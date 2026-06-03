@@ -106,6 +106,66 @@ export async function startMcpServer(buffer: ErrorBuffer): Promise<McpServer> {
     }),
   );
 
+  // --- Prompts (surface as slash-commands in Claude Code) ------------------
+
+  server.registerPrompt(
+    "analyze_browser_errors",
+    {
+      title: "Analyze browser errors",
+      description:
+        "Pull recent browser errors from Pigeon and analyze likely root causes, " +
+        "grouped, with concrete fixes.",
+      argsSchema: {
+        limit: z.string().optional().describe("How many recent errors to include (default 20)."),
+        level: z.enum(["error", "warn", "network"]).optional().describe("Only this level."),
+        pageUrl: z.string().optional().describe("Only errors whose page URL contains this substring."),
+      },
+    },
+    ({ limit, level, pageUrl }) => {
+      const n = limit ? Math.max(1, Math.min(200, parseInt(limit, 10) || 20)) : 20;
+      const items = buffer.getRecent({ limit: n, level, pageUrl });
+      const body = items.length ? JSON.stringify(items, null, 2) : "(no errors are currently buffered)";
+      const scope =
+        (level ? ` (level=${level})` : "") + (pageUrl ? ` (page contains "${pageUrl}")` : "");
+      return {
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text:
+                `These are the ${items.length} most recent browser error(s) captured by Pigeon${scope}. ` +
+                "Prefer `resolvedStack` over `stack` when present — it points at original source.\n\n" +
+                "```json\n" + body + "\n```\n\n" +
+                "Group them by likely root cause, explain each, and propose concrete code fixes. " +
+                "If you need a fresh repro, use the `wait_for_next_error` tool.",
+            },
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerPrompt(
+    "fix_latest_error",
+    {
+      title: "Fix the latest browser error",
+      description: "Focus on the single most recent browser error and propose a fix.",
+      argsSchema: {},
+    },
+    () => {
+      const [latest] = buffer.getRecent({ limit: 1 });
+      const text = latest
+        ? "The most recent browser error captured by Pigeon:\n\n```json\n" +
+          JSON.stringify(latest, null, 2) +
+          "\n```\n\nUse `resolvedStack` if present. Locate the offending code, explain the cause, " +
+          "and propose a fix."
+        : "No browser errors are currently buffered. Ask me to reproduce the issue, then call " +
+          "the `wait_for_next_error` tool.";
+      return { messages: [{ role: "user", content: { type: "text", text } }] };
+    },
+  );
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   log("MCP server connected over stdio");

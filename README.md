@@ -5,6 +5,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/pepperonas/pigeon/actions/workflows/ci.yml"><img src="https://github.com/pepperonas/pigeon/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/version-0.1.0-blue.svg?style=flat-square" alt="Version" />
   <img src="https://img.shields.io/badge/status-v1%20minimal-orange.svg?style=flat-square" alt="Status" />
@@ -58,6 +59,13 @@ pigeon/
 | `wait_for_next_error({ timeout_ms? })` | Block until the next error arrives — *“reproduce in the browser, then check.”* |
 | `get_error_stats()` | Counts per level + newest/oldest timestamps. |
 | `clear_errors()` | Empty the buffer. |
+
+**Prompts** (appear as slash-commands in Claude Code's `/` menu)
+
+| Prompt | Purpose |
+|--------|---------|
+| `analyze_browser_errors({ limit?, level?, pageUrl? })` | Embeds the recent errors and asks for root‑cause analysis + concrete fixes. |
+| `fix_latest_error()` | Focuses on the single newest error (with its resolved stack) and proposes a fix. |
 
 **Resource** — `pigeon://errors`: a live JSON snapshot of the buffer.
 

@@ -130,7 +130,19 @@ const stats = JSON.parse(textOf(await client.callTool({ name: "get_error_stats",
 assert(stats.byLevel.network >= 1, "stats count network level");
 console.error("network + filtering OK:", JSON.stringify(stats.byLevel));
 
-// 6. clear, then dedup on a clean buffer
+// 6. prompts advertised and rendered with live buffer content
+const promptNames = (await client.listPrompts()).prompts.map((p) => p.name).sort();
+console.error("prompts:", promptNames.join(", "));
+assert(
+  promptNames.includes("analyze_browser_errors") && promptNames.includes("fix_latest_error"),
+  "both prompts advertised",
+);
+const fixPrompt = await client.getPrompt({ name: "fix_latest_error", arguments: {} });
+const fixText = (fixPrompt.messages ?? []).map((m: any) => m.content?.text ?? "").join("\n");
+assert(fixText.includes("most recent browser error"), "fix_latest_error renders buffer content");
+console.error("prompts OK");
+
+// 7. clear, then dedup on a clean buffer
 await client.callTool({ name: "clear_errors", arguments: {} });
 const dup = { level: "warn", origin: "console.warn", message: "dup", stack: "x", pageUrl: PAGE, timestamp: Date.now() };
 ws.send(JSON.stringify(dup));
