@@ -43,3 +43,24 @@ jobs:
       - name: End-to-end MCP test
         working-directory: server
         run: npm run test:e2e
+
+  browser-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      - name: Install extension deps
+        working-directory: extension
+        run: npm ci
+
+      - name: Install Chromium (Chrome for Testing)
+        working-directory: extension
+        run: node node_modules/playwright-core/cli.js install --with-deps chromium
+
+      - name: Real-browser smoke test
+        working-directory: extension
+        run: npm run test:browser

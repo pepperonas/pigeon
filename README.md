@@ -219,6 +219,8 @@ Changing the port? Update `WS_URL` in `extension/src/background.ts` and rebuild.
 ## What's captured
 
 - **Console:** `console.error` / `console.warn` (wrapped, then passed through unchanged).
+  The hooks are installed by a `MAIN`-world content script at `document_start`, so they run
+  before any page script and catch even synchronous errors during initial load.
 - **Uncaught exceptions** (`window` `error`) and **unhandled promise rejections**.
 - **Failed network requests:** `fetch` and `XMLHttpRequest` responses with status ≥ 400 or
   a transport failure (status `0`). Intentional `abort`s are ignored. Original semantics
@@ -250,4 +252,5 @@ npm --prefix server run test:sourcemap  # source-map resolution test
 # extension
 npm --prefix extension run dev        # esbuild --watch
 npm --prefix extension run typecheck  # tsc --noEmit
+npm --prefix extension run test:browser  # real-Chrome smoke test (loads the extension)
 ```

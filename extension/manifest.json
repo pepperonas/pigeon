@@ -15,15 +15,17 @@
   "content_scripts": [
     {
       "matches": ["http://localhost/*", "http://127.0.0.1/*"],
+      "js": ["injected.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    },
+    {
+      "matches": ["http://localhost/*", "http://127.0.0.1/*"],
       "js": ["content.js"],
       "run_at": "document_start",
+      "world": "ISOLATED",
       "all_frames": false
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["injected.js"],
-      "matches": ["http://localhost/*", "http://127.0.0.1/*"]
     }
   ]
 }

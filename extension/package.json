@@ -8,11 +8,15 @@
     "build": "node build.mjs",
     "dev": "node build.mjs --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:browser": "node build.mjs && node test/browser-smoke.mjs",
     "clean": "rm -rf dist"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.270",
+    "@types/ws": "^8.18.1",
     "esbuild": "^0.24.0",
-    "typescript": "^5.5.4"
+    "playwright-core": "^1.60.0",
+    "typescript": "^5.5.4",
+    "ws": "^8.21.0"
   }
 }
