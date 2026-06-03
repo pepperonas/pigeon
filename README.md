@@ -147,6 +147,13 @@ Use the absolute path to the built entry point. From the `pigeon/` directory:
 claude mcp add pigeon -- node "$(pwd)/server/dist/index.js"
 ```
 
+Add `-s user` to register it **globally** (available in every project, not just this one) —
+recommended if you do web dev across several repos:
+
+```bash
+claude mcp add -s user pigeon -- node "$(pwd)/server/dist/index.js"
+```
+
 Or add it to a `.mcp.json` in your project:
 
 ```json
@@ -180,15 +187,58 @@ four tools and the `pigeon://errors` resource.
 
 ---
 
-## Typical workflow
+## Using Pigeon in your Claude Code workflow
 
-1. Run your dev app on `localhost`, with the extension on (popup toggle).
-2. In Claude Code: *“Reproduce the bug — I'll wait for the error.”* Claude calls
-   `wait_for_next_error`.
-3. Trigger the bug in the browser. The error streams through and Claude reads the message
-   + stack, then fixes it.
+Once registered (ideally `-s user`, so it's there in every project) and the extension shows
+**Connected**, run your dev server on `localhost` and work as usual. Verify with `/mcp`
+(pigeon connected) and the popup's green dot.
 
-Or just ask: *“What errors are in the browser right now?”* → `get_recent_errors`.
+### Recipes
+
+- **Reactive — “what's broken?”** → *“What errors are in the browser right now?”* Claude calls
+  `get_recent_errors` and reads the message + **source-mapped** stack (original file, not minified).
+- **Repro-driven — the core loop.** *“I'll reproduce it, wait for the error.”* Claude calls
+  `wait_for_next_error`; you trigger it in the browser; it streams in and Claude fixes it. After the
+  fix: *“reload the tab”* → `reload_tab` → wait again. That's **edit → reload → verify** without
+  leaving the CLI.
+- **Slash-commands.** The prompts appear in the `/` menu: `/analyze_browser_errors` (group all
+  current errors by root cause) and `/fix_latest_error` (focus the newest one).
+- **Visual / state bugs.** Uncaught errors carry a screenshot + DOM snapshot —
+  *“look at the screenshot from the last error”* (`pigeon://errors/{id}/screenshot` and `/dom`).
+- **Inspect live (opt-in).** With eval enabled (see Browser control below): *“evaluate
+  `window.__store.getState()` in the page”* → `eval_in_page`.
+- **Recurring errors.** With `PIGEON_DB` set: *“has this error happened before?”* → `get_error_history`
+  (spans restarts).
+
+### Make it smoother
+
+**Let Claude reach for Pigeon on its own** — add to a project's `CLAUDE.md`:
+
+```markdown
+## Debugging
+For runtime errors in the browser, use the `pigeon` MCP tools
+(`get_recent_errors`, `wait_for_next_error`) instead of asking me to paste console output.
+```
+
+**Skip permission prompts** for the read-only tools — in `settings.json`:
+
+```json
+{ "permissions": { "allow": [
+  "mcp__pigeon__get_recent_errors",
+  "mcp__pigeon__get_error_stats",
+  "mcp__pigeon__wait_for_next_error",
+  "mcp__pigeon__get_error_history"
+] } }
+```
+
+Leave `reload_tab`, `eval_in_page`, and `clear_errors` to prompt.
+
+### One limitation
+
+The bridge runs **inside** the Claude Code session and binds port `8765`. With multiple Claude
+Code sessions open at once, the first owns the port; others still have the tools but get no
+browser feed. Fine for one-session-per-project work; for more, run the bridge as a standalone
+service.
 
 ## Browser control & security
 
