@@ -20,6 +20,7 @@ const options = {
 function copyStatic() {
   cpSync("manifest.json", "dist/manifest.json");
   cpSync("popup.html", "dist/popup.html");
+  for (const n of [16, 48, 128]) cpSync(`icons/icon${n}.png`, `dist/icon${n}.png`);
 }
 
 rmSync("dist", { recursive: true, force: true });

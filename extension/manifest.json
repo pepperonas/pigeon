@@ -5,12 +5,22 @@
   "description": "Forwards browser console errors and uncaught exceptions to Claude Code via a local WebSocket bridge.",
   "permissions": ["storage", "alarms", "scripting"],
   "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
   "background": {
     "service_worker": "background.js"
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Pigeon"
+    "default_title": "Pigeon",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
   },
   "content_scripts": [
     {
