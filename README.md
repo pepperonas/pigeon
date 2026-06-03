@@ -250,7 +250,19 @@ npm --prefix server run test:e2e        # full MCP client/server smoke test
 npm --prefix server run test:sourcemap  # source-map resolution test
 
 # extension
-npm --prefix extension run dev        # esbuild --watch
-npm --prefix extension run typecheck  # tsc --noEmit
-npm --prefix extension run test:browser  # real-Chrome smoke test (loads the extension)
+npm --prefix extension run dev           # esbuild --watch
+npm --prefix extension run typecheck     # tsc --noEmit
+npm --prefix extension run test:unit     # pure serialization unit tests
+npm --prefix extension run test:browser  # real-browser smoke test (loads the extension)
 ```
+
+`test:browser` loads the built extension into **Chrome for Testing** (system Google Chrome
+blocks unpacked extensions). Install it once:
+
+```bash
+cd extension && node node_modules/playwright-core/cli.js install chromium
+```
+
+CI (`.github/workflows/ci.yml`) runs everything on each push: a `build-test` job (build,
+typecheck, unit + source-map + MCP E2E) and a `browser-e2e` job (real-browser smoke test).
+See [`CLAUDE.md`](CLAUDE.md) for the architecture and the invariants worth not regressing.
