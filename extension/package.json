@@ -8,6 +8,7 @@
     "build": "node build.mjs",
     "dev": "node build.mjs --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "node test/run-unit.mjs",
     "test:browser": "node build.mjs && node test/browser-smoke.mjs",
     "clean": "rm -rf dist"
   },

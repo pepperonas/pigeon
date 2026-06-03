@@ -10,6 +10,8 @@
  * Sends each event to the content script via window.postMessage. Runs in the
  * page's world — no access to `chrome.*` here.
  */
+import { buildMessage, serializeArg } from "./serialize.js";
+
 (() => {
   const MARK = "__pigeon__";
 
@@ -45,20 +47,8 @@
     }
   }
 
-  function serialize(arg: unknown): string {
-    if (typeof arg === "string") return arg;
-    if (arg instanceof Error) return `${arg.name}: ${arg.message}`;
-    if (arg === undefined) return "undefined";
-    if (arg === null) return "null";
-    try {
-      return JSON.stringify(arg);
-    } catch {
-      return String(arg);
-    }
-  }
-
   function fromConsole(level: "error" | "warn", origin: string, args: unknown[]): Payload {
-    const message = args.map(serialize).join(" ");
+    const message = buildMessage(args);
     const errArg = args.find((a) => a instanceof Error) as Error | undefined;
     let stack = errArg?.stack;
     if (!stack) {
@@ -112,7 +102,7 @@
     const message =
       reason instanceof Error
         ? `${reason.name}: ${reason.message}`
-        : `Unhandled promise rejection: ${serialize(reason)}`;
+        : `Unhandled promise rejection: ${serializeArg(reason)}`;
     post({
       level: "error",
       origin: "unhandledrejection",

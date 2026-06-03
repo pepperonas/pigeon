@@ -36,6 +36,10 @@ jobs:
         working-directory: extension
         run: npm run typecheck
 
+      - name: Extension unit tests
+        working-directory: extension
+        run: npm run test:unit
+
       - name: Source-map test
         working-directory: server
         run: npm run test:sourcemap
