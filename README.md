@@ -67,7 +67,18 @@ pigeon/
 | `analyze_browser_errors({ limit?, level?, pageUrl? })` | Embeds the recent errors and asks for root‑cause analysis + concrete fixes. |
 | `fix_latest_error()` | Focuses on the single newest error (with its resolved stack) and proposes a fix. |
 
-**Resource** — `pigeon://errors`: a live JSON snapshot of the buffer.
+**Resources**
+
+| Resource | Contents |
+|----------|----------|
+| `pigeon://errors` | Live JSON snapshot of the buffer. |
+| `pigeon://errors/{id}/screenshot` | JPEG of the page when an uncaught error fired. |
+| `pigeon://errors/{id}/dom` | `outerHTML` of the page at error time. |
+
+On **uncaught errors / unhandled rejections**, Pigeon also captures a screenshot
+(rate-limited, best-effort — the error's tab must be the visible one) and a DOM snapshot.
+Entries gain `hasScreenshot`/`hasDom` flags plus `screenshotUri`/`domUri`. Toggle this off
+in the popup ("Snapshots on errors"); console/network events never carry snapshots.
 
 Each captured error carries `level`, `message`, `stack`, `source`, `line`, `col`,
 `pageUrl`, `origin`, `timestamp`, plus `tabId`/`tabTitle` (which tab it came from) and,

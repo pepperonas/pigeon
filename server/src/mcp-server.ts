@@ -1,11 +1,32 @@
 import { randomUUID } from "node:crypto";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import type { ErrorBuffer } from "./buffer.js";
+import type { BufferedError } from "./types.js";
 import { log } from "./log.js";
 
 const ERRORS_URI = "pigeon://errors";
+
+/** Add attachment URIs so Claude knows where to fetch DOM/screenshot for an error. */
+function withAttachmentUris(items: BufferedError[]): unknown[] {
+  return items.map((e) => ({
+    ...e,
+    ...(e.hasScreenshot ? { screenshotUri: `pigeon://errors/${e.id}/screenshot` } : {}),
+    ...(e.hasDom ? { domUri: `pigeon://errors/${e.id}/dom` } : {}),
+  }));
+}
+
+/** Split a data URL into mime type + base64 payload. */
+function parseDataUrl(dataUrl: string): { mimeType: string; base64: string } {
+  const m = /^data:([^;,]+)[^,]*,(.*)$/s.exec(dataUrl);
+  if (!m) return { mimeType: "application/octet-stream", base64: "" };
+  return { mimeType: m[1], base64: m[2] };
+}
+
+function firstVar(v: string | string[] | undefined): string {
+  return Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
+}
 
 /**
  * Wrap untrusted browser-captured content for a prompt.
@@ -49,7 +70,7 @@ export async function startMcpServer(buffer: ErrorBuffer): Promise<McpServer> {
       },
     },
     async ({ limit, level, pageUrl, since }) => {
-      const items = buffer.getRecent({ limit, level, pageUrl, since });
+      const items = withAttachmentUris(buffer.getRecent({ limit, level, pageUrl, since }));
       return {
         content: [{ type: "text", text: JSON.stringify(items, null, 2) }],
       };
@@ -120,10 +141,59 @@ export async function startMcpServer(buffer: ErrorBuffer): Promise<McpServer> {
         {
           uri: uri.href,
           mimeType: "application/json",
-          text: JSON.stringify(buffer.getRecent(), null, 2),
+          text: JSON.stringify(withAttachmentUris(buffer.getRecent()), null, 2),
         },
       ],
     }),
+  );
+
+  // Per-error screenshot (image/jpeg) captured when an uncaught error fired.
+  server.registerResource(
+    "error-screenshot",
+    new ResourceTemplate("pigeon://errors/{id}/screenshot", {
+      list: async () => ({
+        resources: buffer.attachmentIds("screenshot").map((id) => ({
+          uri: `pigeon://errors/${id}/screenshot`,
+          name: `Screenshot for error ${id}`,
+          mimeType: "image/jpeg",
+        })),
+      }),
+    }),
+    {
+      title: "Error screenshot",
+      description: "JPEG screenshot of the page at the moment an uncaught error fired.",
+    },
+    async (uri, vars) => {
+      const id = Number(firstVar(vars.id));
+      const att = buffer.getAttachment(id);
+      if (!att?.screenshot) throw new Error(`no screenshot for error ${id}`);
+      const { mimeType, base64 } = parseDataUrl(att.screenshot);
+      return { contents: [{ uri: uri.href, mimeType, blob: base64 }] };
+    },
+  );
+
+  // Per-error DOM snapshot (text/html).
+  server.registerResource(
+    "error-dom",
+    new ResourceTemplate("pigeon://errors/{id}/dom", {
+      list: async () => ({
+        resources: buffer.attachmentIds("dom").map((id) => ({
+          uri: `pigeon://errors/${id}/dom`,
+          name: `DOM snapshot for error ${id}`,
+          mimeType: "text/html",
+        })),
+      }),
+    }),
+    {
+      title: "Error DOM snapshot",
+      description: "HTML of the page (document.documentElement.outerHTML) at error time.",
+    },
+    async (uri, vars) => {
+      const id = Number(firstVar(vars.id));
+      const att = buffer.getAttachment(id);
+      if (!att?.dom) throw new Error(`no DOM snapshot for error ${id}`);
+      return { contents: [{ uri: uri.href, mimeType: "text/html", text: att.dom }] };
+    },
   );
 
   // --- Prompts (surface as slash-commands in Claude Code) ------------------

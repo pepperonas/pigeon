@@ -1,10 +1,14 @@
 import { EventEmitter } from "node:events";
-import type { BufferedError, ErrorEvent, ErrorStats } from "./types.js";
+import type { Attachment, BufferedError, ErrorEvent, ErrorStats } from "./types.js";
 
 const MAX_ENTRIES = 200;
 const DEDUP_WINDOW_MS = 2000;
 /** How many recent entries to scan when looking for a dedup match. */
 const DEDUP_SCAN = 50;
+/** Cap on stored DOM snapshots (server-side safety net). */
+const MAX_DOM = 1_000_000;
+/** Keep at most this many error attachments (screenshots/DOM) to bound memory. */
+const MAX_ATTACHMENTS = 20;
 
 export interface GetRecentOptions {
   limit?: number;
@@ -23,6 +27,7 @@ export interface GetRecentOptions {
  */
 export class ErrorBuffer extends EventEmitter {
   private items: BufferedError[] = [];
+  private attachments = new Map<number, Attachment>();
   private nextId = 1;
 
   add(ev: ErrorEvent): BufferedError {
@@ -41,18 +46,55 @@ export class ErrorBuffer extends EventEmitter {
       }
     }
 
+    // Keep large blobs out of the ring buffer; reference them by id.
+    const { dom, screenshot, ...rest } = ev;
     const entry: BufferedError = {
-      ...ev,
+      ...rest,
       timestamp: now,
       id: this.nextId++,
       count: 1,
       firstSeen: now,
       lastSeen: now,
     };
+    if (dom || screenshot) {
+      this.attachments.set(entry.id, {
+        dom: dom ? dom.slice(0, MAX_DOM) : undefined,
+        screenshot,
+      });
+      entry.hasDom = !!dom;
+      entry.hasScreenshot = !!screenshot;
+      this.trimAttachments();
+    }
+
     this.items.push(entry);
-    if (this.items.length > MAX_ENTRIES) this.items.shift();
+    if (this.items.length > MAX_ENTRIES) {
+      const removed = this.items.shift();
+      if (removed) this.attachments.delete(removed.id);
+    }
     this.emit("add", entry);
     return entry;
+  }
+
+  getAttachment(id: number): Attachment | undefined {
+    return this.attachments.get(id);
+  }
+
+  /** Ids that currently have an attachment of the given kind (oldest first). */
+  attachmentIds(kind: "dom" | "screenshot"): number[] {
+    const out: number[] = [];
+    for (const [id, a] of this.attachments) {
+      if (kind === "dom" && a.dom) out.push(id);
+      if (kind === "screenshot" && a.screenshot) out.push(id);
+    }
+    return out;
+  }
+
+  private trimAttachments(): void {
+    while (this.attachments.size > MAX_ATTACHMENTS) {
+      const oldest = this.attachments.keys().next().value;
+      if (oldest === undefined) break;
+      this.attachments.delete(oldest);
+    }
   }
 
   /** Newest first, optionally filtered. */
@@ -72,6 +114,7 @@ export class ErrorBuffer extends EventEmitter {
   clear(): number {
     const n = this.items.length;
     this.items = [];
+    this.attachments.clear();
     return n;
   }
 

@@ -130,6 +130,39 @@ const stats = JSON.parse(textOf(await client.callTool({ name: "get_error_stats",
 assert(stats.byLevel.network >= 1, "stats count network level");
 console.error("network + filtering OK:", JSON.stringify(stats.byLevel));
 
+// 5b. attachments: push an uncaught error with DOM + screenshot, read resources
+const fakeShot = "data:image/jpeg;base64," + Buffer.from("JPEGDATA").toString("base64");
+ws.send(
+  JSON.stringify({
+    level: "error",
+    origin: "onerror",
+    message: "snapshot error",
+    stack: "Error: snap\n    at x (a.js:1:1)",
+    dom: "<html><body>snap-dom-marker</body></html>",
+    screenshot: fakeShot,
+    pageUrl: PAGE,
+    tabId: 7,
+    timestamp: Date.now(),
+  }),
+);
+await sleep(150);
+const recentJson = JSON.parse(
+  textOf(await client.callTool({ name: "get_recent_errors", arguments: { limit: 10 } })),
+);
+const snap = recentJson.find((e: any) => e.message === "snapshot error");
+assert(snap && snap.hasScreenshot && snap.hasDom, "entry flags screenshot + dom attachments");
+assert(snap.screenshotUri === `pigeon://errors/${snap.id}/screenshot`, "screenshotUri decorated");
+assert(snap.dom === undefined && snap.screenshot === undefined, "big blobs stripped from list output");
+
+const shotRes: any = await client.readResource({ uri: snap.screenshotUri });
+assert(
+  shotRes.contents[0]?.mimeType === "image/jpeg" && typeof shotRes.contents[0]?.blob === "string",
+  "screenshot resource returns a jpeg blob",
+);
+const domRes: any = await client.readResource({ uri: snap.domUri });
+assert((domRes.contents[0]?.text ?? "").includes("snap-dom-marker"), "dom resource returns the HTML");
+console.error("attachments + resources OK");
+
 // 6. prompts advertised and rendered with live buffer content
 const promptNames = (await client.listPrompts()).prompts.map((p) => p.name).sort();
 console.error("prompts:", promptNames.join(", "));

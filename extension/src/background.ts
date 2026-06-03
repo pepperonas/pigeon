@@ -21,6 +21,8 @@ let connected = false;
 let backoff = INITIAL_BACKOFF;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let enabled = true;
+let snapshots = true; // capture screenshot + DOM on uncaught errors
+let lastCaptureAt = 0;
 let queue: PigeonError[] = [];
 
 // ---------------------------------------------------------------------------
@@ -28,8 +30,9 @@ let queue: PigeonError[] = [];
 // ---------------------------------------------------------------------------
 
 async function loadState(): Promise<void> {
-  const local = await chrome.storage.local.get("enabled");
+  const local = await chrome.storage.local.get(["enabled", "snapshots"]);
   enabled = local.enabled !== false; // default ON
+  snapshots = local.snapshots !== false; // default ON
   const session = await chrome.storage.session.get("queue");
   if (Array.isArray(session.queue)) queue = session.queue as PigeonError[];
 }
@@ -124,8 +127,30 @@ function enqueue(ev: PigeonError): void {
   if (queue.length > MAX_QUEUE) queue.shift();
 }
 
-async function handleError(payload: PigeonError): Promise<void> {
+/** Best-effort visible-tab screenshot, rate-limited to respect Chrome's quota. */
+async function captureScreenshot(windowId: number): Promise<string | undefined> {
+  const now = Date.now();
+  if (now - lastCaptureAt < 1100) return undefined;
+  lastCaptureAt = now;
+  try {
+    return await chrome.tabs.captureVisibleTab(windowId, { format: "jpeg", quality: 50 });
+  } catch {
+    return undefined; // active tab may not be a permitted origin
+  }
+}
+
+async function handleError(payload: PigeonError, windowId?: number): Promise<void> {
   if (!enabled) return;
+
+  const origin = typeof payload.origin === "string" ? payload.origin : "";
+  const isUncaught = origin === "onerror" || origin === "unhandledrejection";
+  if (!snapshots) {
+    delete payload.dom; // honour the toggle even though injected.ts always attaches it
+  } else if (isUncaught && typeof windowId === "number") {
+    const shot = await captureScreenshot(windowId);
+    if (shot) payload.screenshot = shot;
+  }
+
   if (connected && socket && socket.readyState === WebSocket.OPEN) {
     try {
       socket.send(JSON.stringify(payload));
@@ -164,6 +189,11 @@ async function setEnabled(value: boolean): Promise<void> {
   await updateBadge();
 }
 
+async function setSnapshots(value: boolean): Promise<void> {
+  snapshots = value;
+  await chrome.storage.local.set({ snapshots });
+}
+
 // ---------------------------------------------------------------------------
 // Badge
 // ---------------------------------------------------------------------------
@@ -197,20 +227,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "pigeon-error") {
     const payload = msg.payload as PigeonError;
     // Enrich with tab context (only the SW can see sender.tab).
+    let windowId: number | undefined;
     if (sender.tab) {
       if (typeof sender.tab.id === "number") payload.tabId = sender.tab.id;
       if (sender.tab.title) payload.tabTitle = sender.tab.title;
+      windowId = sender.tab.windowId;
     }
-    void handleError(payload);
+    void handleError(payload, windowId);
     return false;
   }
   if (msg.type === "pigeon-status") {
-    sendResponse({ connected, queued: queue.length, enabled });
+    sendResponse({ connected, queued: queue.length, enabled, snapshots });
     return true;
   }
   if (msg.type === "pigeon-set-enabled") {
     void setEnabled(!!msg.enabled).then(() =>
-      sendResponse({ connected, queued: queue.length, enabled }),
+      sendResponse({ connected, queued: queue.length, enabled, snapshots }),
+    );
+    return true; // async response
+  }
+  if (msg.type === "pigeon-set-snapshots") {
+    void setSnapshots(!!msg.enabled).then(() =>
+      sendResponse({ connected, queued: queue.length, enabled, snapshots }),
     );
     return true; // async response
   }

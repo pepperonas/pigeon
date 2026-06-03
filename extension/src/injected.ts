@@ -22,9 +22,20 @@
     line?: number;
     col?: number;
     status?: number;
+    dom?: string;
     pageUrl: string;
     timestamp: number;
   };
+
+  const DOM_CAP = 200_000;
+  function captureDom(): string | undefined {
+    try {
+      const html = document.documentElement.outerHTML;
+      return html.length > DOM_CAP ? html.slice(0, DOM_CAP) + "\n<!-- pigeon: truncated -->" : html;
+    } catch {
+      return undefined;
+    }
+  }
 
   function post(payload: Payload): void {
     try {
@@ -88,6 +99,7 @@
         source: e.filename || undefined,
         line: typeof e.lineno === "number" ? e.lineno : undefined,
         col: typeof e.colno === "number" ? e.colno : undefined,
+        dom: captureDom(),
         pageUrl: window.location.href,
         timestamp: Date.now(),
       });
@@ -106,6 +118,7 @@
       origin: "unhandledrejection",
       message,
       stack: reason instanceof Error ? reason.stack : undefined,
+      dom: captureDom(),
       pageUrl: window.location.href,
       timestamp: Date.now(),
     });

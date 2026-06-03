@@ -3,15 +3,19 @@ interface Status {
   connected: boolean;
   queued: number;
   enabled: boolean;
+  snapshots: boolean;
 }
 
 const dot = document.getElementById("dot") as HTMLSpanElement;
 const statusText = document.getElementById("statusText") as HTMLSpanElement;
 const queued = document.getElementById("queued") as HTMLSpanElement;
 const toggle = document.getElementById("toggle") as HTMLInputElement;
+const snapToggle = document.getElementById("snapToggle") as HTMLInputElement;
 
 function render(s: Status): void {
   toggle.checked = s.enabled;
+  snapToggle.checked = s.snapshots;
+  snapToggle.disabled = !s.enabled;
   queued.textContent = String(s.queued);
 
   dot.classList.remove("on", "off");
@@ -42,6 +46,11 @@ async function refresh(): Promise<void> {
 
 toggle.addEventListener("change", async () => {
   const s = await ask({ type: "pigeon-set-enabled", enabled: toggle.checked });
+  if (s) render(s);
+});
+
+snapToggle.addEventListener("change", async () => {
+  const s = await ask({ type: "pigeon-set-snapshots", enabled: snapToggle.checked });
   if (s) render(s);
 });
 
