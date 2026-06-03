@@ -59,6 +59,7 @@ pigeon/
 | `wait_for_next_error({ timeout_ms? })` | Block until the next error arrives — *“reproduce in the browser, then check.”* |
 | `get_error_stats()` | Counts per level + newest/oldest timestamps. |
 | `clear_errors()` | Empty the buffer. |
+| `get_error_history({ limit?, level?, since? })` | **When `PIGEON_DB` is set.** Query the on-disk history — spans restarts, beyond the 200-entry buffer. |
 | `reload_tab({ tabId? })` | Reload a dev tab (active localhost tab by default) — re-trigger an error after a fix. |
 | `eval_in_page({ expression, tabId?, timeout_ms? })` | **Gated.** Run JS in the page's MAIN world and return the result. Off unless explicitly enabled (see below). |
 
@@ -195,6 +196,7 @@ Pigeon can also drive the browser, so Claude can *reproduce* a bug rather than o
 | `PIGEON_LOG_FILE` | — | server | If set, mirror stderr logs to this file. |
 | `PIGEON_SOURCEMAPS` | `1` | server | Set to `0` to disable source-map resolution of stacks. |
 | `PIGEON_ALLOW_EVAL` | — | server | Set to `1` to expose the `eval_in_page` tool (also needs the popup toggle). |
+| `PIGEON_DB` | — | server | Path to a JSONL file; enables persistent history + the `get_error_history` tool. |
 
 Changing the port? Update `WS_URL` in `extension/src/background.ts` and rebuild.
 
@@ -216,6 +218,9 @@ Changing the port? Update `WS_URL` in `extension/src/background.ts` and rebuild.
   `chrome.storage.session`, so errors aren't lost across an eviction.
 - One browser, one bridge: the buffer is shared across all matched tabs (filter with
   `get_recent_errors({ pageUrl })`).
+- **History:** with `PIGEON_DB=/path/to/history.jsonl`, new errors are appended as JSONL and
+  reloaded on startup. The file is append-only and excludes screenshots/DOM (those stay
+  in-memory only) — rotate or delete it yourself.
 - Lighthouse / performance metrics remain out of scope for now.
 
 ## Development

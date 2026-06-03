@@ -71,8 +71,23 @@ export class ErrorBuffer extends EventEmitter {
       const removed = this.items.shift();
       if (removed) this.attachments.delete(removed.id);
     }
-    this.emit("add", entry);
+    this.emit("add", entry); // any add/bump — wakes wait_for_next_error
+    this.emit("new", entry); // brand-new entry only — used for persistence
     return entry;
+  }
+
+  /**
+   * Seed the buffer from persisted history on startup. Attachments aren't
+   * persisted, so the dangling has* flags are dropped. Does not emit events,
+   * so re-loaded entries aren't re-persisted.
+   */
+  hydrate(entries: BufferedError[]): void {
+    this.items = entries
+      .slice(-MAX_ENTRIES)
+      .map(({ hasDom, hasScreenshot, ...rest }) => rest);
+    let maxId = 0;
+    for (const e of this.items) if (e.id > maxId) maxId = e.id;
+    this.nextId = maxId + 1;
   }
 
   getAttachment(id: number): Attachment | undefined {

@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import type { ErrorBuffer } from "./buffer.js";
 import type { CommandBus } from "./commandbus.js";
+import type { ErrorStore } from "./store.js";
 import type { BufferedError } from "./types.js";
 import { log } from "./log.js";
 
@@ -51,6 +52,7 @@ function untrustedBlock(label: string, json: string): string {
 export async function startMcpServer(
   buffer: ErrorBuffer,
   commandBus: CommandBus,
+  store?: ErrorStore,
 ): Promise<McpServer> {
   const server = new McpServer({ name: "pigeon", version: "0.1.0" });
 
@@ -131,6 +133,32 @@ export async function startMcpServer(
       return { content: [{ type: "text", text: JSON.stringify(buffer.stats(), null, 2) }] };
     },
   );
+
+  // --- History (persisted across restarts, when PIGEON_DB is set) ----------
+
+  if (store) {
+    server.registerTool(
+      "get_error_history",
+      {
+        title: "Query persisted error history",
+        description:
+          "Query the on-disk error history (set via PIGEON_DB). Unlike get_recent_errors, " +
+          "this spans restarts and goes beyond the 200-entry in-memory buffer. Newest first.",
+        inputSchema: {
+          limit: z.number().int().positive().max(5000).optional()
+            .describe("Maximum number of entries to return."),
+          level: z.enum(["error", "warn", "network"]).optional().describe("Only this level."),
+          since: z.number().optional()
+            .describe("Epoch milliseconds; only entries at or after this time."),
+        },
+      },
+      async ({ limit, level, since }) => {
+        const items = await store.query({ limit, level, since });
+        return { content: [{ type: "text", text: JSON.stringify(items, null, 2) }] };
+      },
+    );
+    log("get_error_history enabled (PIGEON_DB set)");
+  }
 
   // --- Browser control (Claude → page) -------------------------------------
 

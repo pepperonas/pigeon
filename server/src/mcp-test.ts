@@ -10,8 +10,11 @@
  *
  * Standalone process — console.* is fine here. Exits non-zero on failure.
  */
+import { rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SourceMapGenerator } from "source-map-js";
@@ -52,11 +55,14 @@ const PORT = (http.address() as AddressInfo).port;
 const PAGE = `http://127.0.0.1:${PORT}/`;
 
 // --- Spawn the bridge as an MCP server --------------------------------------
+const histPath = join(tmpdir(), "pigeon-e2e-history.jsonl");
+rmSync(histPath, { force: true }); // start from a clean history file
+
 const transport = new StdioClientTransport({
   command: "node",
   args: ["dist/index.js"],
   stderr: "inherit",
-  env: { ...process.env, PIGEON_ALLOW_EVAL: "1" } as Record<string, string>,
+  env: { ...process.env, PIGEON_ALLOW_EVAL: "1", PIGEON_DB: histPath } as Record<string, string>,
 });
 const client = new Client({ name: "pigeon-e2e", version: "0.1.0" });
 await client.connect(transport);
@@ -204,6 +210,17 @@ const reloadOut = textOf(await client.callTool({ name: "reload_tab", arguments: 
 assert(reloadOut.includes("7"), "reload_tab acknowledged");
 console.error("bidirectional control OK");
 
+// 6c. persistence: errors are written to the JSONL history (PIGEON_DB)
+await sleep(150);
+const histTools = (await client.listTools()).tools.map((t) => t.name);
+assert(histTools.includes("get_error_history"), "get_error_history tool present (PIGEON_DB set)");
+const history = JSON.parse(
+  textOf(await client.callTool({ name: "get_error_history", arguments: { limit: 100 } })),
+);
+assert(Array.isArray(history) && history.length >= 2, `history persisted (${history.length} entries)`);
+assert(history.some((e: any) => e.message === "boom"), "history contains an earlier error");
+console.error("history OK:", history.length, "entries");
+
 // 7. clear, then dedup on a clean buffer
 await client.callTool({ name: "clear_errors", arguments: {} });
 const dup = { level: "warn", origin: "console.warn", message: "dup", stack: "x", pageUrl: PAGE, timestamp: Date.now() };
@@ -223,5 +240,6 @@ console.error("clear OK");
 ws.close();
 http.close();
 await client.close();
+rmSync(histPath, { force: true });
 console.error("\nALL E2E CHECKS PASSED");
 process.exit(0);
