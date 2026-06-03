@@ -1,12 +1,14 @@
 import { ErrorBuffer } from "./buffer.js";
+import { CommandBus } from "./commandbus.js";
 import { startWebSocketServer } from "./ws-server.js";
 import { startMcpServer } from "./mcp-server.js";
 import { log } from "./log.js";
 
 async function main(): Promise<void> {
   const buffer = new ErrorBuffer();
-  startWebSocketServer(buffer);
-  await startMcpServer(buffer);
+  const commandBus = new CommandBus();
+  startWebSocketServer(buffer, commandBus);
+  await startMcpServer(buffer, commandBus);
   log("Pigeon bridge ready");
 }
 

@@ -3,6 +3,7 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mc
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import type { ErrorBuffer } from "./buffer.js";
+import type { CommandBus } from "./commandbus.js";
 import type { BufferedError } from "./types.js";
 import { log } from "./log.js";
 
@@ -47,7 +48,10 @@ function untrustedBlock(label: string, json: string): string {
   );
 }
 
-export async function startMcpServer(buffer: ErrorBuffer): Promise<McpServer> {
+export async function startMcpServer(
+  buffer: ErrorBuffer,
+  commandBus: CommandBus,
+): Promise<McpServer> {
   const server = new McpServer({ name: "pigeon", version: "0.1.0" });
 
   server.registerTool(
@@ -127,6 +131,66 @@ export async function startMcpServer(buffer: ErrorBuffer): Promise<McpServer> {
       return { content: [{ type: "text", text: JSON.stringify(buffer.stats(), null, 2) }] };
     },
   );
+
+  // --- Browser control (Claude → page) -------------------------------------
+
+  server.registerTool(
+    "reload_tab",
+    {
+      title: "Reload a browser tab",
+      description:
+        "Reload a dev tab via the Pigeon extension. Targets the given tabId, or the " +
+        "active localhost tab if omitted. Handy to re-trigger an error after a fix.",
+      inputSchema: {
+        tabId: z.number().int().optional().describe("Tab to reload (default: active localhost tab)."),
+      },
+    },
+    async ({ tabId }) => {
+      try {
+        const res = await commandBus.send("reload", tabId != null ? { tabId } : {}, 5000);
+        return { content: [{ type: "text", text: `Reloaded. ${JSON.stringify(res)}` }] };
+      } catch (e) {
+        return { content: [{ type: "text", text: `reload_tab failed: ${(e as Error).message}` }], isError: true };
+      }
+    },
+  );
+
+  // eval_in_page runs arbitrary JS in the page — double opt-in: this env flag
+  // AND the extension's "Allow remote eval" toggle. Off by default.
+  if (process.env.PIGEON_ALLOW_EVAL === "1") {
+    server.registerTool(
+      "eval_in_page",
+      {
+        title: "Evaluate JavaScript in the page",
+        description:
+          "DANGER: runs arbitrary JavaScript in the page's MAIN world via the extension " +
+          "and returns the result (type + JSON/string repr). Use to inspect state or " +
+          "reproduce a bug. Only works on localhost tabs and requires the extension's " +
+          "'Allow remote eval' toggle to also be on.",
+        inputSchema: {
+          expression: z.string().describe("JavaScript expression to evaluate in the page."),
+          tabId: z.number().int().optional().describe("Target tab (default: active localhost tab)."),
+          timeout_ms: z.number().int().positive().max(30000).optional()
+            .describe("How long to wait for the result (default 5000)."),
+        },
+      },
+      async ({ expression, tabId, timeout_ms }) => {
+        try {
+          const res = await commandBus.send(
+            "eval",
+            { expression, ...(tabId != null ? { tabId } : {}) },
+            timeout_ms ?? 5000,
+          );
+          return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
+        } catch (e) {
+          return { content: [{ type: "text", text: `eval_in_page failed: ${(e as Error).message}` }], isError: true };
+        }
+      },
+    );
+    log("eval_in_page ENABLED (PIGEON_ALLOW_EVAL=1)");
+  } else {
+    log("eval_in_page disabled — set PIGEON_ALLOW_EVAL=1 to expose it");
+  }
 
   server.registerResource(
     "errors",

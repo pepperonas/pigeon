@@ -4,6 +4,7 @@ interface Status {
   queued: number;
   enabled: boolean;
   snapshots: boolean;
+  allowControl: boolean;
 }
 
 const dot = document.getElementById("dot") as HTMLSpanElement;
@@ -11,11 +12,14 @@ const statusText = document.getElementById("statusText") as HTMLSpanElement;
 const queued = document.getElementById("queued") as HTMLSpanElement;
 const toggle = document.getElementById("toggle") as HTMLInputElement;
 const snapToggle = document.getElementById("snapToggle") as HTMLInputElement;
+const ctrlToggle = document.getElementById("ctrlToggle") as HTMLInputElement;
 
 function render(s: Status): void {
   toggle.checked = s.enabled;
   snapToggle.checked = s.snapshots;
   snapToggle.disabled = !s.enabled;
+  ctrlToggle.checked = s.allowControl;
+  ctrlToggle.disabled = !s.enabled;
   queued.textContent = String(s.queued);
 
   dot.classList.remove("on", "off");
@@ -51,6 +55,11 @@ toggle.addEventListener("change", async () => {
 
 snapToggle.addEventListener("change", async () => {
   const s = await ask({ type: "pigeon-set-snapshots", enabled: snapToggle.checked });
+  if (s) render(s);
+});
+
+ctrlToggle.addEventListener("change", async () => {
+  const s = await ask({ type: "pigeon-set-control", enabled: ctrlToggle.checked });
   if (s) render(s);
 });
 

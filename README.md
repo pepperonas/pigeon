@@ -59,6 +59,8 @@ pigeon/
 | `wait_for_next_error({ timeout_ms? })` | Block until the next error arrives — *“reproduce in the browser, then check.”* |
 | `get_error_stats()` | Counts per level + newest/oldest timestamps. |
 | `clear_errors()` | Empty the buffer. |
+| `reload_tab({ tabId? })` | Reload a dev tab (active localhost tab by default) — re-trigger an error after a fix. |
+| `eval_in_page({ expression, tabId?, timeout_ms? })` | **Gated.** Run JS in the page's MAIN world and return the result. Off unless explicitly enabled (see below). |
 
 **Prompts** (appear as slash-commands in Claude Code's `/` menu)
 
@@ -171,6 +173,20 @@ four tools and the `pigeon://errors` resource.
 
 Or just ask: *“What errors are in the browser right now?”* → `get_recent_errors`.
 
+## Browser control & security
+
+Pigeon can also drive the browser, so Claude can *reproduce* a bug rather than only read it:
+
+- **`reload_tab`** — always available; reloads the target tab.
+- **`eval_in_page`** — runs **arbitrary JavaScript** in the page. This is powerful and
+  dangerous, so it is **off by default** behind a **double opt-in** — both must be true:
+  1. Start the server with `PIGEON_ALLOW_EVAL=1` (otherwise the tool isn't even exposed).
+  2. Turn on **"Allow remote eval ⚠️"** in the extension popup (otherwise the extension
+     refuses every eval command).
+
+  It only targets `localhost`/`127.0.0.1` tabs. Leave both off unless you actively want
+  Claude to execute code in your dev page.
+
 ## Configuration
 
 | Env var | Default | Where | Meaning |
@@ -178,6 +194,7 @@ Or just ask: *“What errors are in the browser right now?”* → `get_recent_e
 | `PIGEON_WS_PORT` | `8765` | server | WebSocket port (must match the extension's `WS_URL`). |
 | `PIGEON_LOG_FILE` | — | server | If set, mirror stderr logs to this file. |
 | `PIGEON_SOURCEMAPS` | `1` | server | Set to `0` to disable source-map resolution of stacks. |
+| `PIGEON_ALLOW_EVAL` | — | server | Set to `1` to expose the `eval_in_page` tool (also needs the popup toggle). |
 
 Changing the port? Update `WS_URL` in `extension/src/background.ts` and rebuild.
 

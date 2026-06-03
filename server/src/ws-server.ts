@@ -1,5 +1,6 @@
 import { WebSocketServer } from "ws";
 import type { ErrorBuffer } from "./buffer.js";
+import type { CommandBus } from "./commandbus.js";
 import type { ErrorEvent } from "./types.js";
 import { resolveStack } from "./sourcemap.js";
 import { log } from "./log.js";
@@ -12,19 +13,25 @@ const MAX_STACK_LEN = 16000;
 const MAX_DOM_LEN = 1_000_000;
 const MAX_SCREENSHOT_LEN = 6_000_000; // base64 data URL upper bound
 
-export function startWebSocketServer(buffer: ErrorBuffer): WebSocketServer {
+export function startWebSocketServer(buffer: ErrorBuffer, commandBus: CommandBus): WebSocketServer {
   const wss = new WebSocketServer({ host: HOST, port: PORT });
 
   wss.on("listening", () => log(`WebSocket listening on ws://${HOST}:${PORT}`));
 
   wss.on("connection", (ws, req) => {
     log("extension connected from", req.socket.remoteAddress ?? "?");
+    commandBus.addSocket(ws);
     ws.on("message", (data) => {
       let parsed: unknown;
       try {
         parsed = JSON.parse(data.toString());
       } catch {
         log("dropped non-JSON message");
+        return;
+      }
+      // Responses to commands we sent (eval_in_page / reload_tab).
+      if (parsed && typeof parsed === "object" && (parsed as { kind?: unknown }).kind === "command-result") {
+        commandBus.handleResult(parsed as Record<string, unknown>);
         return;
       }
       const batch = Array.isArray(parsed) ? parsed : [parsed];
@@ -44,7 +51,10 @@ export function startWebSocketServer(buffer: ErrorBuffer): WebSocketServer {
         }
       }
     });
-    ws.on("close", () => log("extension disconnected"));
+    ws.on("close", () => {
+      commandBus.removeSocket(ws);
+      log("extension disconnected");
+    });
     ws.on("error", (e) => log("connection error", e.message));
   });
 

@@ -22,6 +22,7 @@ let backoff = INITIAL_BACKOFF;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let enabled = true;
 let snapshots = true; // capture screenshot + DOM on uncaught errors
+let allowControl = false; // allow remote eval_in_page (off by default)
 let lastCaptureAt = 0;
 let queue: PigeonError[] = [];
 
@@ -30,9 +31,10 @@ let queue: PigeonError[] = [];
 // ---------------------------------------------------------------------------
 
 async function loadState(): Promise<void> {
-  const local = await chrome.storage.local.get(["enabled", "snapshots"]);
+  const local = await chrome.storage.local.get(["enabled", "snapshots", "allowControl"]);
   enabled = local.enabled !== false; // default ON
   snapshots = local.snapshots !== false; // default ON
+  allowControl = local.allowControl === true; // default OFF
   const session = await chrome.storage.session.get("queue");
   if (Array.isArray(session.queue)) queue = session.queue as PigeonError[];
 }
@@ -104,6 +106,107 @@ function connect(): void {
       /* ignore */
     }
   };
+  ws.onmessage = (ev) => {
+    void handleCommand(ev.data);
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Remote control (Claude → page): eval_in_page / reload_tab
+// ---------------------------------------------------------------------------
+
+function sendRaw(obj: unknown): void {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    try {
+      socket.send(JSON.stringify(obj));
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+async function activeLocalhostTabId(): Promise<number | undefined> {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    return tab?.id ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function evalInTab(
+  tabId: number,
+  expression: string,
+): Promise<{ ok: boolean; result?: unknown; error?: string }> {
+  try {
+    const [injection] = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      args: [expression],
+      func: (expr: string) => {
+        try {
+          // eslint-disable-next-line no-eval
+          const value = (0, eval)(expr);
+          let repr: string;
+          try {
+            repr = JSON.stringify(value);
+          } catch {
+            repr = String(value);
+          }
+          if (repr === undefined) repr = String(value);
+          return { ok: true, type: typeof value, repr };
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      },
+    });
+    const r = injection?.result as
+      | { ok: boolean; type?: string; repr?: string; error?: string }
+      | undefined;
+    if (!r) return { ok: false, error: "no result from page" };
+    if (!r.ok) return { ok: false, error: r.error };
+    return { ok: true, result: { type: r.type, repr: r.repr } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+async function handleCommand(data: unknown): Promise<void> {
+  let msg: Record<string, unknown>;
+  try {
+    msg = JSON.parse(typeof data === "string" ? data : String(data));
+  } catch {
+    return;
+  }
+  if (!msg || msg.kind !== "command" || typeof msg.id !== "string") return;
+
+  const respond = (ok: boolean, result?: unknown, error?: string) =>
+    sendRaw({ kind: "command-result", id: msg.id, ok, result, error });
+
+  try {
+    const tabId =
+      typeof msg.tabId === "number" ? msg.tabId : await activeLocalhostTabId();
+    if (tabId == null) return respond(false, undefined, "no target tab available");
+
+    if (msg.name === "reload") {
+      await chrome.tabs.reload(tabId);
+      return respond(true, { reloaded: tabId });
+    }
+    if (msg.name === "eval") {
+      if (!allowControl) {
+        return respond(
+          false,
+          undefined,
+          "remote eval is disabled in the Pigeon extension — enable 'Allow remote eval' in the popup",
+        );
+      }
+      const out = await evalInTab(tabId, String(msg.expression ?? ""));
+      return respond(out.ok, out.result, out.error);
+    }
+    respond(false, undefined, `unknown command: ${String(msg.name)}`);
+  } catch (e) {
+    respond(false, undefined, e instanceof Error ? e.message : String(e));
+  }
 }
 
 async function flush(): Promise<void> {
@@ -194,6 +297,11 @@ async function setSnapshots(value: boolean): Promise<void> {
   await chrome.storage.local.set({ snapshots });
 }
 
+async function setAllowControl(value: boolean): Promise<void> {
+  allowControl = value;
+  await chrome.storage.local.set({ allowControl });
+}
+
 // ---------------------------------------------------------------------------
 // Badge
 // ---------------------------------------------------------------------------
@@ -237,18 +345,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
   if (msg.type === "pigeon-status") {
-    sendResponse({ connected, queued: queue.length, enabled, snapshots });
+    sendResponse({ connected, queued: queue.length, enabled, snapshots, allowControl });
     return true;
   }
   if (msg.type === "pigeon-set-enabled") {
     void setEnabled(!!msg.enabled).then(() =>
-      sendResponse({ connected, queued: queue.length, enabled, snapshots }),
+      sendResponse({ connected, queued: queue.length, enabled, snapshots, allowControl }),
     );
     return true; // async response
   }
   if (msg.type === "pigeon-set-snapshots") {
     void setSnapshots(!!msg.enabled).then(() =>
-      sendResponse({ connected, queued: queue.length, enabled, snapshots }),
+      sendResponse({ connected, queued: queue.length, enabled, snapshots, allowControl }),
+    );
+    return true; // async response
+  }
+  if (msg.type === "pigeon-set-control") {
+    void setAllowControl(!!msg.enabled).then(() =>
+      sendResponse({ connected, queued: queue.length, enabled, snapshots, allowControl }),
     );
     return true; // async response
   }

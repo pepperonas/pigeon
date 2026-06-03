@@ -3,7 +3,7 @@
   "name": "Pigeon — Console Error Forwarder",
   "version": "0.1.0",
   "description": "Forwards browser console errors and uncaught exceptions to Claude Code via a local WebSocket bridge.",
-  "permissions": ["storage", "alarms"],
+  "permissions": ["storage", "alarms", "scripting"],
   "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
   "background": {
     "service_worker": "background.js"

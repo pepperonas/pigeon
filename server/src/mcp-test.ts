@@ -56,6 +56,7 @@ const transport = new StdioClientTransport({
   command: "node",
   args: ["dist/index.js"],
   stderr: "inherit",
+  env: { ...process.env, PIGEON_ALLOW_EVAL: "1" } as Record<string, string>,
 });
 const client = new Client({ name: "pigeon-e2e", version: "0.1.0" });
 await client.connect(transport);
@@ -79,6 +80,24 @@ const ws = new WebSocket("ws://127.0.0.1:8765");
 await new Promise<void>((res, rej) => {
   ws.on("open", () => res());
   ws.on("error", rej);
+});
+
+// Act as the extension: answer command messages from the server.
+ws.on("message", (data) => {
+  let m: any;
+  try {
+    m = JSON.parse(data.toString());
+  } catch {
+    return;
+  }
+  if (m?.kind !== "command") return;
+  if (m.name === "eval") {
+    ws.send(JSON.stringify({ kind: "command-result", id: m.id, ok: true, result: { type: "number", repr: "42" } }));
+  } else if (m.name === "reload") {
+    ws.send(JSON.stringify({ kind: "command-result", id: m.id, ok: true, result: { reloaded: m.tabId ?? 7 } }));
+  } else {
+    ws.send(JSON.stringify({ kind: "command-result", id: m.id, ok: false, error: "unknown" }));
+  }
 });
 const jsError = {
   level: "error",
@@ -174,6 +193,16 @@ const fixPrompt = await client.getPrompt({ name: "fix_latest_error", arguments: 
 const fixText = (fixPrompt.messages ?? []).map((m: any) => m.content?.text ?? "").join("\n");
 assert(fixText.includes("most recent browser error"), "fix_latest_error renders buffer content");
 console.error("prompts OK");
+
+// 6b. bidirectional control: reload_tab + eval_in_page (server spawned with PIGEON_ALLOW_EVAL=1)
+const allTools = (await client.listTools()).tools.map((t) => t.name);
+assert(allTools.includes("reload_tab"), "reload_tab tool present");
+assert(allTools.includes("eval_in_page"), "eval_in_page tool present (PIGEON_ALLOW_EVAL=1)");
+const evalOut = textOf(await client.callTool({ name: "eval_in_page", arguments: { expression: "40+2", tabId: 7 } }));
+assert(evalOut.includes("42"), "eval_in_page returns the page result");
+const reloadOut = textOf(await client.callTool({ name: "reload_tab", arguments: { tabId: 7 } }));
+assert(reloadOut.includes("7"), "reload_tab acknowledged");
+console.error("bidirectional control OK");
 
 // 7. clear, then dedup on a clean buffer
 await client.callTool({ name: "clear_errors", arguments: {} });
