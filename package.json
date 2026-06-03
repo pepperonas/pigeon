@@ -1,0 +1,15 @@
+{
+  "name": "pigeon",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Forward browser console errors to Claude Code via MCP.",
+  "license": "MIT",
+  "scripts": {
+    "install:all": "npm --prefix server install && npm --prefix extension install",
+    "build": "npm --prefix server run build && npm --prefix extension run build",
+    "start": "npm --prefix server start",
+    "dev:server": "npm --prefix server run dev",
+    "dev:extension": "npm --prefix extension run dev",
+    "test": "npm --prefix server run test:e2e"
+  }
+}

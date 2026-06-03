@@ -1,0 +1,27 @@
+{
+  "name": "pigeon-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pigeon bridge: WebSocket receiver for browser errors + MCP stdio server for Claude Code.",
+  "type": "module",
+  "bin": {
+    "pigeon-server": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -w -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test:e2e": "node dist/mcp-test.js",
+    "test:client": "node dist/test-client.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "ws": "^8.18.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.5.4"
+  }
+}

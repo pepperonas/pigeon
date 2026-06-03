@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pigeon</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        font: 13px/1.4 system-ui, -apple-system, sans-serif;
+        margin: 0;
+        width: 240px;
+        padding: 14px 16px;
+      }
+      h1 {
+        font-size: 14px;
+        margin: 0 0 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      h1 .logo { font-size: 16px; }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 0;
+      }
+      .status { display: flex; align-items: center; gap: 7px; }
+      .dot { width: 9px; height: 9px; border-radius: 50%; background: #9e9e9e; }
+      .dot.on { background: #43a047; }
+      .dot.off { background: #e53935; }
+      .muted { color: #888; }
+      .count { font-variant-numeric: tabular-nums; font-weight: 600; }
+      /* toggle switch */
+      .switch { position: relative; display: inline-block; width: 38px; height: 22px; }
+      .switch input { opacity: 0; width: 0; height: 0; }
+      .slider {
+        position: absolute; cursor: pointer; inset: 0;
+        background: #bbb; border-radius: 22px; transition: 0.2s;
+      }
+      .slider::before {
+        content: ""; position: absolute; height: 16px; width: 16px;
+        left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: 0.2s;
+      }
+      input:checked + .slider { background: #43a047; }
+      input:checked + .slider::before { transform: translateX(16px); }
+      hr { border: none; border-top: 1px solid #8883; margin: 10px 0; }
+    </style>
+  </head>
+  <body>
+    <h1><span class="logo">🐦</span> Pigeon</h1>
+
+    <div class="row">
+      <div class="status">
+        <span id="dot" class="dot"></span>
+        <span id="statusText" class="muted">…</span>
+      </div>
+      <label class="switch" title="Enable/disable forwarding">
+        <input type="checkbox" id="toggle" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <hr />
+
+    <div class="row">
+      <span class="muted">Buffered errors</span>
+      <span id="queued" class="count">0</span>
+    </div>
+    <div class="row">
+      <span class="muted">Bridge</span>
+      <span class="muted">ws://localhost:8765</span>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

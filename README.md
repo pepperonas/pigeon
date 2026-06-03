@@ -1,0 +1,178 @@
+# 🐦 Pigeon
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Pigeon-console%20errors%20%E2%86%92%20Claude%20Code-7C3AED?style=for-the-badge&logo=anthropic&logoColor=white" alt="Pigeon" />
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License: MIT" /></a>
+  <img src="https://img.shields.io/badge/version-0.1.0-blue.svg?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/badge/status-v1%20minimal-orange.svg?style=flat-square" alt="Status" />
+  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square" alt="PRs welcome" />
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/Node.js-18%2B-339933?style=flat-square&logo=node.js&logoColor=white" alt="Node 18+" />
+  <img src="https://img.shields.io/badge/MCP-stdio-000000?style=flat-square&logo=anthropic&logoColor=white" alt="Model Context Protocol" />
+  <img src="https://img.shields.io/badge/WebSocket-ws-010101?style=flat-square&logo=socketdotio&logoColor=white" alt="WebSocket" />
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?style=flat-square&logo=googlechrome&logoColor=white" alt="Chrome MV3" />
+  <img src="https://img.shields.io/badge/bundler-esbuild-FFCF00?style=flat-square&logo=esbuild&logoColor=black" alt="esbuild" />
+  <img src="https://img.shields.io/badge/Claude%20Code-ready-D97757?style=flat-square&logo=claude&logoColor=white" alt="Claude Code" />
+  <img src="https://img.shields.io/badge/platform-localhost-lightgrey?style=flat-square" alt="localhost" />
+</p>
+
+Forward **browser console errors** straight to **Claude Code** — no more copy‑pasting
+stack traces. Pigeon captures `console.error`/`console.warn`, uncaught exceptions, and
+unhandled promise rejections from your dev pages and exposes them to Claude Code over the
+**Model Context Protocol (MCP)**.
+
+```
+Browser page → Extension → WebSocket → Bridge server → MCP (stdio) → Claude Code
+```
+
+A browser extension can't talk to a CLI process directly, hence the chain. The bridge
+server is a single Node process that wears two hats: a WebSocket receiver for the
+extension, and an MCP stdio server for Claude Code.
+
+## Layout
+
+```
+pigeon/
+  extension/   # Chrome Manifest V3 extension (TypeScript, esbuild)
+  server/      # Node bridge: WebSocket server + MCP stdio server (TypeScript)
+  README.md
+```
+
+## What Claude gets
+
+**Tools**
+
+| Tool | Purpose |
+|------|---------|
+| `get_recent_errors({ limit?, level?, since? })` | Buffered errors, newest first; optional filters. |
+| `wait_for_next_error({ timeout_ms? })` | Block until the next error arrives — *“reproduce in the browser, then check.”* |
+| `get_error_stats()` | Counts per level + newest/oldest timestamps. |
+| `clear_errors()` | Empty the buffer. |
+
+**Resource** — `pigeon://errors`: a live JSON snapshot of the buffer.
+
+The server keeps a **ring buffer** of the latest 200 errors and **deduplicates**
+identical `message`+`stack` pairs seen within 2 seconds (collapsed into one entry with a
+`count`).
+
+---
+
+## Setup
+
+### 1. Build & start the bridge server
+
+```bash
+cd pigeon
+npm run install:all      # installs server/ and extension/ deps
+npm run build            # builds both
+```
+
+Start the bridge. Normally Claude Code launches it for you (see step 3) — but you can run
+it standalone for testing:
+
+```bash
+npm start                # = node server/dist/index.js
+```
+
+> The bridge listens on `ws://127.0.0.1:8765` for the extension and speaks MCP over
+> **stdio**. All logs go to **stderr** (or `$PIGEON_LOG_FILE`) — never stdout, which is
+> reserved for the MCP JSON‑RPC protocol.
+
+Smoke‑test without the extension:
+
+```bash
+npm test                 # spawns the server, pushes a fake error, asserts the MCP tools
+# or, against an already-running server:
+npm --prefix server run test:client
+```
+
+### 2. Load the extension in Chrome
+
+1. Open `chrome://extensions`.
+2. Enable **Developer mode** (top right).
+3. Click **Load unpacked** and select **`pigeon/extension/dist`**.
+4. The 🐦 icon appears. Click it: the popup shows connection status, the number of
+   buffered errors, and an on/off toggle.
+
+The extension only activates on `http://localhost/*` and `http://127.0.0.1/*` (your dev
+servers). It connects to the bridge automatically; if the bridge isn't running yet, it
+reconnects with exponential backoff and buffers errors in the meantime.
+
+> Rebuild after changes with `npm run dev:extension` (watch) or `npm --prefix extension
+> run build`, then hit **Reload** on the extension card.
+
+### 3. Register the MCP server with Claude Code
+
+Use the absolute path to the built entry point. From the `pigeon/` directory:
+
+```bash
+claude mcp add pigeon -- node "$(pwd)/server/dist/index.js"
+```
+
+Or add it to a `.mcp.json` in your project:
+
+```json
+{
+  "mcpServers": {
+    "pigeon": {
+      "command": "node",
+      "args": ["/Users/martin/claude/pigeon/server/dist/index.js"]
+    }
+  }
+}
+```
+
+Then, inside Claude Code, verify with `/mcp` — you should see `pigeon` connected with its
+four tools and the `pigeon://errors` resource.
+
+---
+
+## Typical workflow
+
+1. Run your dev app on `localhost`, with the extension on (popup toggle).
+2. In Claude Code: *“Reproduce the bug — I'll wait for the error.”* Claude calls
+   `wait_for_next_error`.
+3. Trigger the bug in the browser. The error streams through and Claude reads the message
+   + stack, then fixes it.
+
+Or just ask: *“What errors are in the browser right now?”* → `get_recent_errors`.
+
+## Configuration
+
+| Env var | Default | Where | Meaning |
+|---------|---------|-------|---------|
+| `PIGEON_WS_PORT` | `8765` | server | WebSocket port (must match the extension's `WS_URL`). |
+| `PIGEON_LOG_FILE` | — | server | If set, mirror stderr logs to this file. |
+
+Changing the port? Update `WS_URL` in `extension/src/background.ts` and rebuild.
+
+## Notes & limits (v1)
+
+- Scope is intentionally minimal: console + uncaught + rejections. **Network requests,
+  Lighthouse, etc. are out of scope for v1.**
+- Only `localhost` / `127.0.0.1` are matched, by design (your dev servers).
+- The MV3 service worker sleeps after ~30s idle; Pigeon reconnects on wake (incoming
+  messages and a 30s `alarms` heartbeat) and persists the pending queue in
+  `chrome.storage.session`, so errors aren't lost across an eviction.
+- One browser, one bridge: the buffer is shared across all matched tabs.
+
+## Development
+
+```bash
+# server
+npm --prefix server run dev          # tsc --watch
+npm --prefix server run test:e2e     # full MCP client/server smoke test
+
+# extension
+npm --prefix extension run dev        # esbuild --watch
+npm --prefix extension run typecheck  # tsc --noEmit
+```
