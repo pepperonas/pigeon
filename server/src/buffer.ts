@@ -11,6 +11,8 @@ export interface GetRecentOptions {
   level?: string;
   /** epoch ms; only entries last seen at/after this time */
   since?: number;
+  /** case-insensitive substring match against pageUrl */
+  pageUrl?: string;
 }
 
 /**
@@ -58,6 +60,10 @@ export class ErrorBuffer extends EventEmitter {
     let out = this.items.slice();
     if (opts.level) out = out.filter((e) => e.level === opts.level);
     if (typeof opts.since === "number") out = out.filter((e) => e.lastSeen >= opts.since!);
+    if (opts.pageUrl) {
+      const needle = opts.pageUrl.toLowerCase();
+      out = out.filter((e) => (e.pageUrl ?? "").toLowerCase().includes(needle));
+    }
     out.reverse();
     if (typeof opts.limit === "number" && opts.limit >= 0) out = out.slice(0, opts.limit);
     return out;

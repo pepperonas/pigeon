@@ -191,11 +191,17 @@ async function updateBadge(): Promise<void> {
 // Wiring
 // ---------------------------------------------------------------------------
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== "object") return false;
 
   if (msg.type === "pigeon-error") {
-    void handleError(msg.payload as PigeonError);
+    const payload = msg.payload as PigeonError;
+    // Enrich with tab context (only the SW can see sender.tab).
+    if (sender.tab) {
+      if (typeof sender.tab.id === "number") payload.tabId = sender.tab.id;
+      if (sender.tab.title) payload.tabTitle = sender.tab.title;
+    }
+    void handleError(payload);
     return false;
   }
   if (msg.type === "pigeon-status") {

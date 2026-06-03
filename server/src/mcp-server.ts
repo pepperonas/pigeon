@@ -14,19 +14,22 @@ export async function startMcpServer(buffer: ErrorBuffer): Promise<McpServer> {
     {
       title: "Get recent browser errors",
       description:
-        "Return buffered browser console errors and uncaught exceptions, newest first. " +
-        "Optionally filter by level or by a `since` timestamp (epoch ms).",
+        "Return buffered browser errors, newest first: console.error/warn, uncaught " +
+        "exceptions, unhandled rejections, and failed network requests. " +
+        "Optionally filter by level, page URL, or a `since` timestamp (epoch ms).",
       inputSchema: {
         limit: z.number().int().positive().max(200).optional()
           .describe("Maximum number of errors to return."),
-        level: z.enum(["error", "warn"]).optional()
-          .describe("Only return errors of this level."),
+        level: z.enum(["error", "warn", "network"]).optional()
+          .describe("Only return errors of this level ('network' = failed requests)."),
+        pageUrl: z.string().optional()
+          .describe("Only errors whose page URL contains this substring (case-insensitive)."),
         since: z.number().optional()
           .describe("Epoch milliseconds; only errors last seen at or after this time."),
       },
     },
-    async ({ limit, level, since }) => {
-      const items = buffer.getRecent({ limit, level, since });
+    async ({ limit, level, pageUrl, since }) => {
+      const items = buffer.getRecent({ limit, level, pageUrl, since });
       return {
         content: [{ type: "text", text: JSON.stringify(items, null, 2) }],
       };

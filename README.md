@@ -26,9 +26,10 @@
 </p>
 
 Forward **browser console errors** straight to **Claude Code** — no more copy‑pasting
-stack traces. Pigeon captures `console.error`/`console.warn`, uncaught exceptions, and
-unhandled promise rejections from your dev pages and exposes them to Claude Code over the
-**Model Context Protocol (MCP)**.
+stack traces. Pigeon captures `console.error`/`console.warn`, uncaught exceptions,
+unhandled promise rejections, **and failed network requests** (`fetch`/XHR) from your dev
+pages and exposes them to Claude Code over the **Model Context Protocol (MCP)**. Minified
+stack traces are **resolved back to original source** via your dev server's source maps.
 
 ```
 Browser page → Extension → WebSocket → Bridge server → MCP (stdio) → Claude Code
@@ -53,12 +54,17 @@ pigeon/
 
 | Tool | Purpose |
 |------|---------|
-| `get_recent_errors({ limit?, level?, since? })` | Buffered errors, newest first; optional filters. |
+| `get_recent_errors({ limit?, level?, pageUrl?, since? })` | Buffered errors, newest first; filter by `level` (`error`/`warn`/`network`), `pageUrl` substring, or `since` timestamp. |
 | `wait_for_next_error({ timeout_ms? })` | Block until the next error arrives — *“reproduce in the browser, then check.”* |
 | `get_error_stats()` | Counts per level + newest/oldest timestamps. |
 | `clear_errors()` | Empty the buffer. |
 
 **Resource** — `pigeon://errors`: a live JSON snapshot of the buffer.
+
+Each captured error carries `level`, `message`, `stack`, `source`, `line`, `col`,
+`pageUrl`, `origin`, `timestamp`, plus `tabId`/`tabTitle` (which tab it came from) and,
+for network events, `status`. When a source map is available, a `resolvedStack` field is
+added with the original `file:line:col` frames.
 
 The server keeps a **ring buffer** of the latest 200 errors and **deduplicates**
 identical `message`+`stack` pairs seen within 2 seconds (collapsed into one entry with a
@@ -152,25 +158,37 @@ Or just ask: *“What errors are in the browser right now?”* → `get_recent_e
 |---------|---------|-------|---------|
 | `PIGEON_WS_PORT` | `8765` | server | WebSocket port (must match the extension's `WS_URL`). |
 | `PIGEON_LOG_FILE` | — | server | If set, mirror stderr logs to this file. |
+| `PIGEON_SOURCEMAPS` | `1` | server | Set to `0` to disable source-map resolution of stacks. |
 
 Changing the port? Update `WS_URL` in `extension/src/background.ts` and rebuild.
 
-## Notes & limits (v1)
+## What's captured
 
-- Scope is intentionally minimal: console + uncaught + rejections. **Network requests,
-  Lighthouse, etc. are out of scope for v1.**
+- **Console:** `console.error` / `console.warn` (wrapped, then passed through unchanged).
+- **Uncaught exceptions** (`window` `error`) and **unhandled promise rejections**.
+- **Failed network requests:** `fetch` and `XMLHttpRequest` responses with status ≥ 400 or
+  a transport failure (status `0`). Intentional `abort`s are ignored. Original semantics
+  are preserved — Pigeon never swallows a response or rejection.
+
+## Notes & limits
+
+- **Source maps** are fetched from the dev server on demand and cached briefly (5 s, so
+  hot-reloads stay accurate). Resolution is best-effort: no map → the raw stack is kept.
 - Only `localhost` / `127.0.0.1` are matched, by design (your dev servers).
 - The MV3 service worker sleeps after ~30s idle; Pigeon reconnects on wake (incoming
   messages and a 30s `alarms` heartbeat) and persists the pending queue in
   `chrome.storage.session`, so errors aren't lost across an eviction.
-- One browser, one bridge: the buffer is shared across all matched tabs.
+- One browser, one bridge: the buffer is shared across all matched tabs (filter with
+  `get_recent_errors({ pageUrl })`).
+- Lighthouse / performance metrics remain out of scope for now.
 
 ## Development
 
 ```bash
 # server
-npm --prefix server run dev          # tsc --watch
-npm --prefix server run test:e2e     # full MCP client/server smoke test
+npm --prefix server run dev             # tsc --watch
+npm --prefix server run test:e2e        # full MCP client/server smoke test
+npm --prefix server run test:sourcemap  # source-map resolution test
 
 # extension
 npm --prefix extension run dev        # esbuild --watch

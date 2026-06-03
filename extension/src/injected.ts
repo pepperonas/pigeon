@@ -14,13 +14,14 @@
   const MARK = "__pigeon__";
 
   type Payload = {
-    level: "error" | "warn";
+    level: "error" | "warn" | "network";
     origin: string;
     message: string;
     stack?: string;
     source?: string;
     line?: number;
     col?: number;
+    status?: number;
     pageUrl: string;
     timestamp: number;
   };
@@ -109,4 +110,73 @@
       timestamp: Date.now(),
     });
   });
+
+  // --- Network failures: fetch ---------------------------------------------
+  function reportNetwork(origin: string, method: string, url: string, status: number, detail: string): void {
+    post({
+      level: "network",
+      origin,
+      message: `${method} ${url} → ${detail}`,
+      source: url,
+      status,
+      pageUrl: window.location.href,
+      timestamp: Date.now(),
+    });
+  }
+
+  const origFetch = window.fetch;
+  if (typeof origFetch === "function") {
+    window.fetch = function (this: unknown, ...args: Parameters<typeof fetch>) {
+      const [input, init] = args;
+      const url = input instanceof Request ? input.url : String(input);
+      const method = (
+        init?.method || (input instanceof Request ? input.method : "GET") || "GET"
+      ).toUpperCase();
+      return origFetch.apply(this, args).then(
+        (res) => {
+          if (!res.ok) reportNetwork("fetch", method, url, res.status, `${res.status} ${res.statusText}`.trim());
+          return res;
+        },
+        (err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          reportNetwork("fetch", method, url, 0, `request failed: ${msg}`);
+          throw err; // never swallow the rejection
+        },
+      );
+    } as typeof fetch;
+  }
+
+  // --- Network failures: XMLHttpRequest ------------------------------------
+  type XhrMeta = { method: string; url: string; aborted?: boolean };
+  const xhrMeta = new WeakMap<XMLHttpRequest, XhrMeta>();
+  const origOpen = XMLHttpRequest.prototype.open;
+  const origSend = XMLHttpRequest.prototype.send;
+
+  XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, method: string, url: string | URL) {
+    xhrMeta.set(this, { method: String(method).toUpperCase(), url: String(url) });
+    // Pass every original argument through (async, user, password) untouched.
+    return (origOpen as (...a: unknown[]) => void).apply(this, arguments as unknown as unknown[]);
+  };
+
+  XMLHttpRequest.prototype.send = function (this: XMLHttpRequest) {
+    this.addEventListener("abort", () => {
+      const m = xhrMeta.get(this);
+      if (m) m.aborted = true;
+    });
+    this.addEventListener("loadend", () => {
+      const meta = xhrMeta.get(this);
+      if (meta?.aborted) return; // intentional aborts aren't failures
+      const status = this.status;
+      if (status === 0 || status >= 400) {
+        reportNetwork(
+          "xhr",
+          meta?.method ?? "GET",
+          meta?.url ?? "?",
+          status,
+          status === 0 ? "request failed" : `${status} ${this.statusText}`.trim(),
+        );
+      }
+    });
+    return (origSend as (...a: unknown[]) => void).apply(this, arguments as unknown as unknown[]);
+  };
 })();

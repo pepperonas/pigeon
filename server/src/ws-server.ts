@@ -1,6 +1,7 @@
 import { WebSocketServer } from "ws";
 import type { ErrorBuffer } from "./buffer.js";
 import type { ErrorEvent } from "./types.js";
+import { resolveStack } from "./sourcemap.js";
 import { log } from "./log.js";
 
 const HOST = "127.0.0.1";
@@ -27,7 +28,18 @@ export function startWebSocketServer(buffer: ErrorBuffer): WebSocketServer {
       const batch = Array.isArray(parsed) ? parsed : [parsed];
       for (const raw of batch) {
         const ev = normalize(raw);
-        if (ev) buffer.add(ev);
+        if (!ev) continue;
+        const entry = buffer.add(ev);
+        // Resolve the minified stack in the background; mutate the stored entry.
+        if (entry.stack && !entry.resolvedStack) {
+          resolveStack(entry.stack, entry.pageUrl)
+            .then((r) => {
+              if (r) entry.resolvedStack = r;
+            })
+            .catch(() => {
+              /* best-effort */
+            });
+        }
       }
     });
     ws.on("close", () => log("extension disconnected"));
@@ -44,14 +56,20 @@ function normalize(raw: unknown): ErrorEvent | null {
   const r = raw as Record<string, unknown>;
   if (typeof r.message !== "string") return null;
 
+  const level: "error" | "warn" | "network" =
+    r.level === "warn" ? "warn" : r.level === "network" ? "network" : "error";
+
   return {
-    level: r.level === "warn" ? "warn" : "error",
+    level,
     message: r.message.slice(0, MAX_MESSAGE_LEN),
     stack: typeof r.stack === "string" ? r.stack.slice(0, MAX_STACK_LEN) : undefined,
     source: typeof r.source === "string" ? r.source : undefined,
     line: typeof r.line === "number" && Number.isFinite(r.line) ? r.line : undefined,
     col: typeof r.col === "number" && Number.isFinite(r.col) ? r.col : undefined,
     pageUrl: typeof r.pageUrl === "string" ? r.pageUrl : undefined,
+    tabId: typeof r.tabId === "number" && Number.isFinite(r.tabId) ? r.tabId : undefined,
+    tabTitle: typeof r.tabTitle === "string" ? r.tabTitle : undefined,
+    status: typeof r.status === "number" && Number.isFinite(r.status) ? r.status : undefined,
     origin: typeof r.origin === "string" ? r.origin : undefined,
     timestamp:
       typeof r.timestamp === "number" && Number.isFinite(r.timestamp)
