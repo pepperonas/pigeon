@@ -109,6 +109,12 @@ export class ErrorBuffer extends EventEmitter {
       const oldest = this.attachments.keys().next().value;
       if (oldest === undefined) break;
       this.attachments.delete(oldest);
+      // Keep the entry truthful so it stops advertising a now-evicted blob.
+      const entry = this.items.find((e) => e.id === oldest);
+      if (entry) {
+        entry.hasDom = undefined;
+        entry.hasScreenshot = undefined;
+      }
     }
   }
 

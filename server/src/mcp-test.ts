@@ -188,6 +188,27 @@ const domRes: any = await client.readResource({ uri: snap.domUri });
 assert((domRes.contents[0]?.text ?? "").includes("snap-dom-marker"), "dom resource returns the HTML");
 console.error("attachments + resources OK");
 
+// 5c. attachment eviction: oldest blob is dropped AND its entry stops advertising it
+for (let i = 0; i < 21; i++) {
+  ws.send(
+    JSON.stringify({
+      level: "error",
+      origin: "onerror",
+      message: `att-${i}`,
+      screenshot: "data:image/jpeg;base64," + Buffer.from(`shot${i}`).toString("base64"),
+      pageUrl: PAGE,
+      timestamp: Date.now(),
+    }),
+  );
+}
+await sleep(250);
+const afterEvict = JSON.parse(
+  textOf(await client.callTool({ name: "get_recent_errors", arguments: { limit: 200 } })),
+);
+const att0 = afterEvict.find((e: any) => e.message === "att-0");
+assert(att0 && !att0.hasScreenshot && att0.screenshotUri === undefined, "evicted attachment no longer advertised");
+console.error("attachment eviction OK");
+
 // 6. prompts advertised and rendered with live buffer content
 const promptNames = (await client.listPrompts()).prompts.map((p) => p.name).sort();
 console.error("prompts:", promptNames.join(", "));
