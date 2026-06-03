@@ -129,7 +129,8 @@ npm --prefix server run test:client
 2. Enable **Developer mode** (top right).
 3. Click **Load unpacked** and select **`pigeon/extension/dist`**.
 4. The 🐦 icon appears. Click it: the popup shows connection status, the number of
-   buffered errors, and an on/off toggle.
+   buffered errors, and three toggles — **forwarding** on/off, **Snapshots on errors**,
+   and **Allow remote eval ⚠️** (for `eval_in_page`, off by default).
 
 The extension only activates on `http://localhost/*` and `http://127.0.0.1/*` (your dev
 servers). It connects to the bridge automatically; if the bridge isn't running yet, it
@@ -157,6 +158,21 @@ Or add it to a `.mcp.json` in your project:
     }
   }
 }
+```
+
+To enable the optional features, pass the env vars at registration. With the CLI:
+
+```bash
+claude mcp add pigeon \
+  --env PIGEON_DB="$HOME/.pigeon/history.jsonl" \
+  --env PIGEON_ALLOW_EVAL=1 \
+  -- node "$(pwd)/server/dist/index.js"
+```
+
+…or in `.mcp.json`, add an `"env"` block alongside `command`/`args`:
+
+```json
+"env": { "PIGEON_DB": "/abs/path/history.jsonl", "PIGEON_ALLOW_EVAL": "1" }
 ```
 
 Then, inside Claude Code, verify with `/mcp` — you should see `pigeon` connected with its
