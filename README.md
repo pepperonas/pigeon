@@ -242,9 +242,10 @@ Leave `reload_tab`, `eval_in_page`, and `clear_errors` to prompt.
 ### Multiple sessions & projects
 
 This works out of the box. A single **bridge daemon** is auto-started on first use and shared
-by every Claude Code session — open as many as you like across different projects. All
-localhost tabs feed the same buffer; scope each session to its own dev server with the
-`pageUrl` filter.
+by every Claude Code session — open as many as you like across different projects. It picks
+free ports automatically (no conflict even if `8765`/`8766` are taken) and advertises them via
+`~/.pigeon/runtime.json`. All localhost tabs feed the same buffer; scope each session to its
+own dev server with the `pageUrl` filter.
 
 **What "scope with `pageUrl`" means.** Because every project's tabs feed one shared buffer, you
 narrow a session to its own errors by filtering on the page URL — a case-insensitive substring
@@ -285,14 +286,19 @@ Pigeon can also drive the browser, so Claude can *reproduce* a bug rather than o
 
 | Env var | Default | Where | Meaning |
 |---------|---------|-------|---------|
-| `PIGEON_WS_PORT` | `8765` | daemon | Extension WebSocket port (must match the extension's `WS_URL`). |
-| `PIGEON_CONTROL_PORT` | `8766` | both | Control-channel port between the daemon and MCP proxies. |
+| `PIGEON_WS_PORT` | `8765` | daemon | **Base** extension WebSocket port. The daemon binds the first free port from here; the extension scans the next 16. |
+| `PIGEON_CONTROL_PORT` | `8766` | daemon | **Base** control-channel port (first free from here). Proxies discover the actual port via the runtime file. |
 | `PIGEON_LOG_FILE` | — | both | If set, mirror stderr logs to this file (handy to see daemon logs). |
+| `PIGEON_RUNTIME_DIR` | `~/.pigeon` | both | Where the daemon writes its discovery file (`runtime.json`) + lock. |
 | `PIGEON_SOURCEMAPS` | `1` | server | Set to `0` to disable source-map resolution of stacks. |
 | `PIGEON_ALLOW_EVAL` | — | server | Set to `1` to expose the `eval_in_page` tool (also needs the popup toggle). |
 | `PIGEON_DB` | — | server | Path to a JSONL file; enables persistent history + the `get_error_history` tool. |
 
-Changing the port? Update `WS_URL` in `extension/src/background.ts` and rebuild.
+Ports are chosen automatically: the daemon takes the first free port at/after each base and
+records it in `~/.pigeon/runtime.json`; proxies read that file and the extension scans the
+range — so Pigeon runs out of the box even if `8765`/`8766` are already taken. You only need
+`PIGEON_WS_PORT` if you want a different base (then also bump `WS_BASE` in
+`extension/src/background.ts`, since the extension scans from there).
 
 ## What's captured
 

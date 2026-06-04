@@ -15,6 +15,7 @@
     "bridge": "node dist/bridge.js",
     "test:e2e": "node dist/mcp-test.js",
     "test:multi": "node dist/multi-test.js",
+    "test:ports": "node dist/port-test.js",
     "test:sourcemap": "node dist/sourcemap-test.js",
     "test:client": "node dist/test-client.js"
   },

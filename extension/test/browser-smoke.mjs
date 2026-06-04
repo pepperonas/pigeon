@@ -31,9 +31,10 @@ function assert(cond, msg) {
 const errors = [];
 let swSocket = null;
 const commandResults = new Map();
-const wss = new WebSocketServer({ port: 8765 }); // all interfaces (v4 + v6)
+const WS_PORT = Number(process.env.PIGEON_TEST_WS_PORT || 8765); // shift to test the extension's port scan
+const wss = new WebSocketServer({ port: WS_PORT });
 wss.on("connection", (ws) => {
-  console.error("[bridge] service worker connected");
+  console.error(`[bridge] service worker connected on :${WS_PORT}`);
   swSocket = ws;
   ws.on("message", (data) => {
     let m;

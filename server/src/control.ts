@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { ErrorBuffer } from "./buffer.js";
 import type { CommandBus } from "./commandbus.js";
 import type { ErrorStore } from "./store.js";
+import { bindWss } from "./runtime.js";
 import { log } from "./log.js";
 
 /**
@@ -36,10 +37,13 @@ export interface ControlServerDeps {
   allowEval: boolean;
 }
 
-export function startControlServer(host: string, port: number, deps: ControlServerDeps): WebSocketServer {
-  const wss = new WebSocketServer({ host, port });
-
-  wss.on("listening", () => log(`control channel on ws://${host}:${port}`));
+export async function startControlServer(
+  host: string,
+  startPort: number,
+  deps: ControlServerDeps,
+): Promise<{ wss: WebSocketServer; port: number }> {
+  const { wss, port } = await bindWss(host, startPort);
+  log(`control channel on ws://${host}:${port}`);
   wss.on("connection", (ws) => {
     ws.on("message", async (data) => {
       let req: ControlRequest;
@@ -58,7 +62,7 @@ export function startControlServer(host: string, port: number, deps: ControlServ
     });
   });
 
-  return wss;
+  return { wss, port };
 }
 
 function send(ws: WebSocket, msg: unknown): void {

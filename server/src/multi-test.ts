@@ -5,9 +5,13 @@
  *
  * Standalone process — console.* is fine. Exits non-zero on failure.
  */
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import WebSocket from "ws";
+import { readRuntime } from "./runtime.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const textOf = (r: any): string => (r?.content ?? []).map((c: any) => c.text ?? "").join("\n");
@@ -17,10 +21,14 @@ function assert(cond: unknown, msg: string): void {
 
 const WS_PORT = 8867;
 const CONTROL_PORT = 8868;
+const RUNTIME_DIR = mkdtempSync(join(tmpdir(), "pigeon-rt-multi-"));
+process.env.PIGEON_RUNTIME_DIR = RUNTIME_DIR;
 
 async function shutdownDaemon(): Promise<void> {
+  const rt = readRuntime();
+  if (!rt) return;
   try {
-    const cws = new WebSocket(`ws://127.0.0.1:${CONTROL_PORT}`);
+    const cws = new WebSocket(`ws://127.0.0.1:${rt.controlPort}`);
     await new Promise<void>((res, rej) => {
       cws.on("open", () => res());
       cws.on("error", rej);
@@ -93,5 +101,6 @@ ws.close();
 await a.client.close();
 await b.client.close();
 await shutdownDaemon();
+rmSync(RUNTIME_DIR, { recursive: true, force: true });
 console.error("\nMULTI-SESSION CHECKS PASSED");
 process.exit(0);

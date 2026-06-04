@@ -2,21 +2,24 @@ import { WebSocketServer } from "ws";
 import type { ErrorBuffer } from "./buffer.js";
 import type { CommandBus } from "./commandbus.js";
 import type { ErrorEvent } from "./types.js";
+import { bindWss } from "./runtime.js";
 import { resolveStack } from "./sourcemap.js";
 import { log } from "./log.js";
 
 const HOST = "127.0.0.1";
-const PORT = Number(process.env.PIGEON_WS_PORT ?? 8765);
 
 const MAX_MESSAGE_LEN = 8000;
 const MAX_STACK_LEN = 16000;
 const MAX_DOM_LEN = 1_000_000;
 const MAX_SCREENSHOT_LEN = 6_000_000; // base64 data URL upper bound
 
-export function startWebSocketServer(buffer: ErrorBuffer, commandBus: CommandBus): WebSocketServer {
-  const wss = new WebSocketServer({ host: HOST, port: PORT });
-
-  wss.on("listening", () => log(`WebSocket listening on ws://${HOST}:${PORT}`));
+export async function startWebSocketServer(
+  buffer: ErrorBuffer,
+  commandBus: CommandBus,
+  startPort: number,
+): Promise<{ wss: WebSocketServer; port: number }> {
+  const { wss, port } = await bindWss(HOST, startPort);
+  log(`WebSocket listening on ws://${HOST}:${port}`);
 
   wss.on("connection", (ws, req) => {
     log("extension connected from", req.socket.remoteAddress ?? "?");
@@ -60,7 +63,7 @@ export function startWebSocketServer(buffer: ErrorBuffer, commandBus: CommandBus
 
   wss.on("error", (e) => log("WebSocket server error", (e as Error).message));
 
-  return wss;
+  return { wss, port };
 }
 
 function normalize(raw: unknown): ErrorEvent | null {

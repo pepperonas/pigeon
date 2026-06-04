@@ -10,7 +10,7 @@
  *
  * Standalone process — console.* is fine here. Exits non-zero on failure.
  */
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -19,6 +19,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SourceMapGenerator } from "source-map-js";
 import WebSocket from "ws";
+import { readRuntime } from "./runtime.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -29,14 +30,18 @@ function assert(cond: unknown, msg: string): void {
   if (!cond) throw new Error("ASSERT FAILED: " + msg);
 }
 
-// Isolated ports so the test never touches a real running bridge (8765/8766).
+// Isolated ports + runtime dir so the test never touches a real running bridge.
 const WS_PORT = 8865;
 const CONTROL_PORT = 8866;
+const RUNTIME_DIR = mkdtempSync(join(tmpdir(), "pigeon-rt-"));
+process.env.PIGEON_RUNTIME_DIR = RUNTIME_DIR; // shared with the spawned proxy/daemon
 
-/** Stop the auto-spawned daemon via its control channel so it doesn't leak. */
+/** Stop the auto-spawned daemon via the control port it recorded in the runtime file. */
 async function shutdownDaemon(): Promise<void> {
+  const rt = readRuntime();
+  if (!rt) return;
   try {
-    const cws = new WebSocket(`ws://127.0.0.1:${CONTROL_PORT}`);
+    const cws = new WebSocket(`ws://127.0.0.1:${rt.controlPort}`);
     await new Promise<void>((res, rej) => {
       cws.on("open", () => res());
       cws.on("error", rej);
@@ -291,5 +296,6 @@ http.close();
 await client.close();
 await shutdownDaemon();
 rmSync(histPath, { force: true });
+rmSync(RUNTIME_DIR, { recursive: true, force: true });
 console.error("\nALL E2E CHECKS PASSED");
 process.exit(0);

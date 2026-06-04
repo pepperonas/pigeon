@@ -8,7 +8,11 @@
  *     so a restart doesn't lose buffered errors or the on/off setting,
  *   - a chrome.alarms heartbeat that keeps the socket warm / reconnects on wake.
  */
-const WS_URL = "ws://localhost:8765";
+// The daemon binds the first free port from WS_BASE; it can't tell us which one
+// (a content script can't read files), so we scan this range. Keep in sync with
+// PORT_SCAN_RANGE in server/src/runtime.ts.
+const WS_BASE = 8765;
+const WS_PORT_SCAN = 16;
 const MAX_QUEUE = 100;
 const INITIAL_BACKOFF = 1000;
 const MAX_BACKOFF = 30000;
@@ -20,6 +24,12 @@ let socket: WebSocket | null = null;
 let connected = false;
 let backoff = INITIAL_BACKOFF;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let portIdx = 0; // which candidate port we're trying
+let failedAttempts = 0; // consecutive failures since the last successful connect
+
+function currentWsUrl(): string {
+  return `ws://localhost:${WS_BASE + (portIdx % WS_PORT_SCAN)}`;
+}
 let enabled = true;
 let snapshots = true; // capture screenshot + DOM on uncaught errors
 let allowControl = false; // allow remote eval_in_page (off by default)
@@ -35,8 +45,12 @@ async function loadState(): Promise<void> {
   enabled = local.enabled !== false; // default ON
   snapshots = local.snapshots !== false; // default ON
   allowControl = local.allowControl === true; // default OFF
-  const session = await chrome.storage.session.get("queue");
+  const session = await chrome.storage.session.get(["queue", "wsPort"]);
   if (Array.isArray(session.queue)) queue = session.queue as PigeonError[];
+  if (typeof session.wsPort === "number") {
+    const offset = session.wsPort - WS_BASE;
+    if (offset >= 0 && offset < WS_PORT_SCAN) portIdx = offset; // resume on the last-working port
+  }
 }
 
 async function persistQueue(): Promise<void> {
@@ -60,8 +74,13 @@ function clearReconnectTimer(): void {
 
 function scheduleReconnect(): void {
   if (!enabled || reconnectTimer !== null) return;
-  const delay = backoff;
-  backoff = Math.min(backoff * 2, MAX_BACKOFF);
+  portIdx += 1; // try the next candidate port on the next attempt
+  failedAttempts += 1;
+  // Sweep the whole port range quickly first; only back off once a full sweep
+  // turned up no daemon (it's probably not running).
+  const fastScan = failedAttempts <= WS_PORT_SCAN;
+  const delay = fastScan ? 250 : backoff;
+  if (!fastScan) backoff = Math.min(backoff * 2, MAX_BACKOFF);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     connect();
@@ -77,7 +96,7 @@ function connect(): void {
 
   let ws: WebSocket;
   try {
-    ws = new WebSocket(WS_URL);
+    ws = new WebSocket(currentWsUrl());
   } catch {
     scheduleReconnect();
     return;
@@ -87,6 +106,9 @@ function connect(): void {
   ws.onopen = () => {
     connected = true;
     backoff = INITIAL_BACKOFF;
+    failedAttempts = 0;
+    // Remember the working port so we try it first next time.
+    void chrome.storage.session.set({ wsPort: WS_BASE + (portIdx % WS_PORT_SCAN) });
     void flush();
     void updateBadge();
   };

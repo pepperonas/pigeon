@@ -24,8 +24,11 @@ npm run build                # build both packages
 
 # server/ (tsc, Node16 ESM)
 npm --prefix server run build
-npm --prefix server start            # run the bridge (also how Claude Code launches it)
-npm --prefix server run test:e2e         # full MCP client/server E2E (spawns server, drives tools)
+npm --prefix server start            # MCP proxy (how Claude Code launches it; auto-spawns the daemon)
+npm --prefix server run bridge       # run the daemon directly (debugging)
+npm --prefix server run test:e2e         # full proxy/daemon E2E (drives every tool over the control channel)
+npm --prefix server run test:multi       # two proxies share one daemon + pageUrl scoping
+npm --prefix server run test:ports       # daemon shifts ports when 8765/8766 are taken
 npm --prefix server run test:sourcemap   # source-map resolution test
 
 # extension/ (esbuild bundle + tsc typecheck)
@@ -57,13 +60,17 @@ There is no per-test runner; each `test:*` is a standalone script. Run one direc
   (`{kind:"command"}` out, `{kind:"command-result"}` back), correlated by id with timeouts.
 - `sourcemap.ts` — fetches the dev server's JS + maps to rewrite minified stacks (cached 5 s).
 - `store.ts` `ErrorStore` — append-only JSONL history when `PIGEON_DB` is set.
-- `control.ts` `startControlServer` — control channel on `:8766`; binding it is the **singleton
-  lock** (daemon exits if already bound). Serves RPC: `getRecent/clear/stats/history/getAttachment/
-  waitForNext/sendCommand/info/shutdown`.
+- `control.ts` `startControlServer` — control channel (RPC: `getRecent/clear/stats/history/
+  getAttachment/waitForNext/sendCommand/info/shutdown`). Binds the first free port from the base.
+- `runtime.ts` — out-of-the-box port handling: `bindWss` picks the first free port from a base;
+  `acquireLock` is the **singleton lock** (atomic `wx` lock file, stale-pid reclaim); the daemon
+  writes its chosen ports to `~/.pigeon/runtime.json` (the discovery file) and removes lock +
+  file on exit. `PORT_SCAN_RANGE` must stay in sync with the extension's scan.
 
 *Proxy* (`index.ts`, the per-session MCP server Claude Code launches):
-- Connects to the daemon via `ControlClient` (`control.ts`), auto-spawning `bridge.js` **detached**
-  if the control port is refused. Queries `info` for capability gating.
+- Discovers the daemon's control port via `~/.pigeon/runtime.json` (`readRuntime`), auto-spawning
+  `bridge.js` **detached** and polling the file if no live daemon is recorded. Queries `info` for
+  capability gating.
 - `mcp-server.ts` — high-level `McpServer` over stdio; every tool/resource/prompt forwards to the
   daemon through the control client. Resources use `ResourceTemplate` for per-error screenshot/DOM.
 - `log.ts` — **all logging goes to stderr** (or `PIGEON_LOG_FILE`). Shared by both.
@@ -74,9 +81,11 @@ There is no per-test runner; each `test:*` is a standalone script. Run one direc
   `fetch`/`XHR` before any page script. Posts events via `window.postMessage`.
 - `content.ts` — ISOLATED world; relays postMessage → `chrome.runtime.sendMessage` **with retry**
   (early events would otherwise be dropped before the lazy SW is listening).
-- `background.ts` — service worker. WebSocket client (backoff reconnect, `alarms` heartbeat,
-  session-persisted queue), screenshot capture, and `handleCommand` (reload / eval via
-  `chrome.scripting.executeScript` in MAIN world).
+- `background.ts` — service worker. WebSocket client that **scans `WS_BASE..+WS_PORT_SCAN`** to
+  find the daemon (it can't read the runtime file), remembers the working port, fast-sweeps then
+  backs off; `alarms` heartbeat, session-persisted queue, screenshot capture, and `handleCommand`
+  (reload / eval via `chrome.scripting.executeScript` in MAIN world). Keep `WS_BASE`/`WS_PORT_SCAN`
+  in sync with `runtime.ts`.
 - `popup.*` / `serialize.ts` (pure, unit-tested).
 
 ## Invariants & gotchas (don't regress these)
@@ -103,12 +112,13 @@ that when editing prompts.
 
 ## Env flags
 
-`PIGEON_WS_PORT` (8765) · `PIGEON_CONTROL_PORT` (8766) · `PIGEON_SOURCEMAPS` (1) ·
-`PIGEON_ALLOW_EVAL` · `PIGEON_DB` (JSONL path) · `PIGEON_LOG_FILE`. These configure the **daemon**
-(the proxy forwards its env when auto-spawning it). Changing the WS port also requires updating
-`WS_URL` in `extension/src/background.ts`.
+`PIGEON_WS_PORT` (8765 base) · `PIGEON_CONTROL_PORT` (8766 base) · `PIGEON_SOURCEMAPS` (1) ·
+`PIGEON_ALLOW_EVAL` · `PIGEON_DB` (JSONL path) · `PIGEON_LOG_FILE` · `PIGEON_RUNTIME_DIR`
+(`~/.pigeon`, override for tests). Ports are *bases* — the daemon takes the first free one from
+each. These configure the **daemon** (the proxy forwards its env when auto-spawning it). Changing
+the WS base also means bumping `WS_BASE` in `extension/src/background.ts`.
 
 ## CI
 
-`.github/workflows/ci.yml`: `build-test` (build both, typecheck, unit + sourcemap + E2E + multi) and
+`.github/workflows/ci.yml`: `build-test` (build both, typecheck, unit + sourcemap + E2E + multi + ports) and
 `browser-e2e` (installs Chrome for Testing, runs the real-browser smoke test).

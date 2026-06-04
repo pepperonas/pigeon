@@ -3,23 +3,40 @@ import { CommandBus } from "./commandbus.js";
 import { ErrorStore } from "./store.js";
 import { startControlServer } from "./control.js";
 import { startWebSocketServer } from "./ws-server.js";
+import { acquireLock, releaseRuntime, writeRuntime } from "./runtime.js";
 import type { BufferedError } from "./types.js";
 import { log } from "./log.js";
 
 /**
- * Standalone Pigeon bridge daemon. Owns the WebSocket server the extension
- * connects to (:8765), the error buffer + persistence + command bus, and a
- * control channel (:8766) that per-session MCP proxies connect to.
+ * Standalone Pigeon bridge daemon. Owns the extension WebSocket, the error
+ * buffer + persistence + command bus, and a control channel for MCP proxies.
  *
- * One daemon serves every Claude Code session and every dev project at once.
- * The control port is the singleton lock: if it's already bound, another daemon
- * is running and we exit cleanly.
+ * Ports are chosen cleverly so it runs out of the box: a lock file gives
+ * single-daemon semantics, and the WS + control servers each bind the first
+ * free port at/after their base. The chosen ports are written to the runtime
+ * discovery file that proxies read (and the extension scans the WS range for).
  */
 
 const HOST = "127.0.0.1";
-const CONTROL_PORT = Number(process.env.PIGEON_CONTROL_PORT ?? 8766);
+const WS_BASE = Number(process.env.PIGEON_WS_PORT ?? 8765);
+const CONTROL_BASE = Number(process.env.PIGEON_CONTROL_PORT ?? 8766);
 
 async function main(): Promise<void> {
+  if (!acquireLock()) {
+    log("another Pigeon daemon is already running — exiting");
+    process.exit(0);
+  }
+
+  // Tidy up the lock + discovery file on the way out.
+  const cleanup = () => releaseRuntime();
+  process.on("exit", cleanup);
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+    process.on(sig, () => {
+      cleanup();
+      process.exit(0);
+    });
+  }
+
   const buffer = new ErrorBuffer();
   const commandBus = new CommandBus();
 
@@ -32,33 +49,29 @@ async function main(): Promise<void> {
     log(`persistence ON → ${process.env.PIGEON_DB} (${history.length} entries loaded)`);
   }
 
-  // Bind the control port first — it's the singleton lock.
-  const control = startControlServer(HOST, CONTROL_PORT, {
+  const control = await startControlServer(HOST, CONTROL_BASE, {
     buffer,
     commandBus,
     store,
     allowEval: process.env.PIGEON_ALLOW_EVAL === "1",
   });
-  await new Promise<void>((resolve, reject) => {
-    control.on("listening", () => resolve());
-    control.on("error", (e: NodeJS.ErrnoException) => {
-      if (e.code === "EADDRINUSE") {
-        log(`control port ${CONTROL_PORT} already in use — another bridge is running, exiting`);
-        process.exit(0);
-      }
-      reject(e);
-    });
+  const ws = await startWebSocketServer(buffer, commandBus, WS_BASE);
+
+  writeRuntime({
+    pid: process.pid,
+    wsPort: ws.port,
+    controlPort: control.port,
+    startedAt: Date.now(),
   });
 
-  // Now the extension-facing WebSocket server.
-  startWebSocketServer(buffer, commandBus);
-
   log(
-    `Pigeon bridge daemon ready (eval ${process.env.PIGEON_ALLOW_EVAL === "1" ? "ON" : "off"})`,
+    `Pigeon bridge daemon ready — extension ws:${ws.port}, control ws:${control.port}, ` +
+      `eval ${process.env.PIGEON_ALLOW_EVAL === "1" ? "ON" : "off"}`,
   );
 }
 
 main().catch((e) => {
+  releaseRuntime();
   log("bridge fatal:", e instanceof Error ? (e.stack ?? e.message) : String(e));
   process.exit(1);
 });
