@@ -39,10 +39,14 @@ function liveControlPort(): number | null {
 async function connectOrSpawn(): Promise<WebSocket> {
   const known = liveControlPort();
   if (known != null) {
-    try {
-      return await openControl(known);
-    } catch {
-      /* stale entry — fall through to spawn */
+    // A live daemon is recorded — retry briefly (it may be mid-startup or busy)
+    // before assuming it's gone and spawning a new one.
+    for (let i = 0; i < 3; i++) {
+      try {
+        return await openControl(known);
+      } catch {
+        if (i < 2) await sleep(150);
+      }
     }
   }
 

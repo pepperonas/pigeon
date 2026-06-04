@@ -53,12 +53,19 @@ async function loadState(): Promise<void> {
   }
 }
 
-async function persistQueue(): Promise<void> {
-  try {
-    await chrome.storage.session.set({ queue });
-  } catch {
-    /* ignore */
-  }
+// Throttle queue persistence: under an error storm we'd otherwise write to
+// storage.session on every event. Coalesce into at most one write per window.
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+function persistQueue(): void {
+  if (persistTimer !== null) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    try {
+      void chrome.storage.session.set({ queue });
+    } catch {
+      /* ignore */
+    }
+  }, 200);
 }
 
 // ---------------------------------------------------------------------------
@@ -253,7 +260,7 @@ async function flush(): Promise<void> {
     }
   }
   if (failed.length) queue = failed.concat(queue);
-  await persistQueue();
+  persistQueue();
 }
 
 function enqueue(ev: PigeonError): void {
@@ -294,7 +301,7 @@ async function handleError(payload: PigeonError, windowId?: number): Promise<voi
     }
   }
   enqueue(payload);
-  await persistQueue();
+  persistQueue();
   await updateBadge();
   connect();
 }
@@ -307,6 +314,9 @@ async function setEnabled(value: boolean): Promise<void> {
   enabled = value;
   await chrome.storage.local.set({ enabled });
   if (enabled) {
+    // Re-enabling should reconnect promptly, not in a stale backoff window.
+    backoff = INITIAL_BACKOFF;
+    failedAttempts = 0;
     connect();
   } else {
     clearReconnectTimer();
