@@ -8,8 +8,11 @@
  * This is a standalone process, so console.* here is fine.
  */
 import WebSocket from "ws";
+import { readRuntime } from "./runtime.js";
 
-const URL = process.env.PIGEON_WS_URL ?? "ws://127.0.0.1:8765";
+// Discover the daemon's actual WS port (it may have shifted from the base).
+const wsPort = readRuntime()?.wsPort ?? 8765;
+const URL = process.env.PIGEON_WS_URL ?? `ws://127.0.0.1:${wsPort}`;
 const ws = new WebSocket(URL);
 
 ws.on("open", () => {

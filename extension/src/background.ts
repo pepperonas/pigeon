@@ -72,10 +72,17 @@ function clearReconnectTimer(): void {
   }
 }
 
-function scheduleReconnect(): void {
+function scheduleReconnect(wasConnected = false): void {
   if (!enabled || reconnectTimer !== null) return;
-  portIdx += 1; // try the next candidate port on the next attempt
-  failedAttempts += 1;
+  if (wasConnected) {
+    // A healthy socket dropped (daemon restart / blip) — retry the SAME port
+    // quickly rather than abandoning the known-good one for a full sweep.
+    failedAttempts = 0;
+    backoff = INITIAL_BACKOFF;
+  } else {
+    portIdx += 1; // connect failed — scan to the next candidate port
+    failedAttempts += 1;
+  }
   // Sweep the whole port range quickly first; only back off once a full sweep
   // turned up no daemon (it's probably not running).
   const fastScan = failedAttempts <= WS_PORT_SCAN;
@@ -102,8 +109,10 @@ function connect(): void {
     return;
   }
   socket = ws;
+  let opened = false;
 
   ws.onopen = () => {
+    opened = true;
     connected = true;
     backoff = INITIAL_BACKOFF;
     failedAttempts = 0;
@@ -118,7 +127,7 @@ function connect(): void {
       connected = false;
     }
     void updateBadge();
-    scheduleReconnect();
+    scheduleReconnect(opened);
   };
   ws.onerror = () => {
     // onclose follows; reconnect is handled there.

@@ -1,4 +1,4 @@
-import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { WebSocketServer } from "ws";
@@ -57,7 +57,10 @@ export function readRuntime(): RuntimeInfo | null {
 
 export function writeRuntime(info: RuntimeInfo): void {
   ensureDir();
-  writeFileSync(runtimeFile(), JSON.stringify(info));
+  // Atomic: write to a temp file then rename, so a proxy never reads a torn file.
+  const tmp = `${runtimeFile()}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(info));
+  renameSync(tmp, runtimeFile());
 }
 
 /** Acquire the single-daemon lock. Returns false if a healthy daemon already holds it. */
@@ -105,6 +108,11 @@ export function bindWss(host: string, startPort: number): Promise<{ wss: WebSock
       wss.once("listening", () => resolve({ wss, port }));
       wss.once("error", (e: NodeJS.ErrnoException) => {
         if (e.code === "EADDRINUSE" && port < startPort + PORT_SCAN_RANGE) {
+          try {
+            wss.close();
+          } catch {
+            /* failed bind holds nothing */
+          }
           port += 1;
           tryOne();
         } else {

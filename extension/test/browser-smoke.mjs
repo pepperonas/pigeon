@@ -61,9 +61,15 @@ const PAGE = `<!doctype html><html><head><title>pigeon-test</title></head><body>
   Promise.reject(new Error("REJECT_MARKER"));
   setTimeout(function(){ throw new Error("THROW_MARKER"); }, 50);
 </script>
+<script>
+  "use strict";
+  // Unbound fetch from strict code (common in bundled apps) — must not break.
+  var uf = window.fetch;
+  uf("/missing-unbound").catch(function(){});
+</script>
 </body></html>`;
 const http = createServer((req, res) => {
-  if (req.url === "/missing-404") {
+  if (req.url === "/missing-404" || req.url === "/missing-unbound") {
     res.writeHead(404).end("nope");
   } else {
     res.writeHead(200, { "content-type": "text/html" }).end(PAGE);
@@ -119,6 +125,13 @@ try {
   assert(s.thrown, "uncaught exception captured (THROW_MARKER, origin onerror)");
   assert(s.reject, "unhandled rejection captured (REJECT_MARKER)");
   assert(s.net, "failed fetch captured as network level (missing-404)");
+
+  // Wrapping fetch must not break an unbound call from strict code.
+  assert(
+    errors.some((e) => e.level === "network" && e.message.includes("missing-unbound")),
+    "unbound fetch still works and is captured (no Illegal invocation)",
+  );
+  assert(!errors.some((e) => /illegal invocation/i.test(e.message)), "no Illegal invocation error");
 
   // tab context should be attached by the service worker
   assert(
