@@ -244,7 +244,23 @@ Leave `reload_tab`, `eval_in_page`, and `clear_errors` to prompt.
 This works out of the box. A single **bridge daemon** is auto-started on first use and shared
 by every Claude Code session — open as many as you like across different projects. All
 localhost tabs feed the same buffer; scope each session to its own dev server with the
-`pageUrl` filter, e.g. *“errors from `:3000`”* → `get_recent_errors({ pageUrl: "3000" })`.
+`pageUrl` filter.
+
+**What "scope with `pageUrl`" means.** Because every project's tabs feed one shared buffer, you
+narrow a session to its own errors by filtering on the page URL — a case-insensitive substring
+match against each error's URL. You don't type the `{ pageUrl: … }` syntax; you just ask in plain
+language and Claude sets the filter:
+
+> *“What errors are coming from viacamp?”* / *“Show the errors from localhost:3000.”*
+> → Claude calls `get_recent_errors({ pageUrl: "3000" })`
+
+Notes:
+- The filter value is whatever is in the tab's **address bar** that uniquely identifies it —
+  usually the port (`"3000"`, `"5173"`) or `"localhost:3000"`.
+- If only one project is running, you don't need the filter at all — the buffer only holds that
+  project's errors.
+- Drop the proactive snippet from [Make it smoother](#make-it-smoother) into each project's
+  `CLAUDE.md` and the session scopes itself automatically.
 
 The daemon keeps running in the background after sessions close (it owns the browser feed) —
 normally just leave it. To stop it: `pkill -f dist/bridge.js`. The **first** session's env
