@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/pepperonas/pigeon/actions/workflows/ci.yml"><img src="https://github.com/pepperonas/pigeon/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License: MIT" /></a>
-  <img src="https://img.shields.io/badge/version-0.1.0-blue.svg?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.2.0-blue.svg?style=flat-square" alt="Version" />
   <img src="https://img.shields.io/badge/status-v1%20minimal-orange.svg?style=flat-square" alt="Status" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square" alt="PRs welcome" />
 </p>
@@ -33,19 +33,25 @@ pages and exposes them to Claude Code over the **Model Context Protocol (MCP)**.
 stack traces are **resolved back to original source** via your dev server's source maps.
 
 ```
-Browser page → Extension → WebSocket → Bridge server → MCP (stdio) → Claude Code
+Browser → Extension → WebSocket ┐
+                                 ▼
+                         Bridge daemon  ──control channel──►  MCP proxy (per session) → Claude Code
+                         (one, shared)                        MCP proxy (per session) → Claude Code
 ```
 
-A browser extension can't talk to a CLI process directly, hence the chain. The bridge
-server is a single Node process that wears two hats: a WebSocket receiver for the
-extension, and an MCP stdio server for Claude Code.
+A browser extension can't talk to a CLI process directly, hence the chain. A single
+**bridge daemon** owns the WebSocket the extension connects to plus the error buffer; it's
+started automatically and shared by every session. Each Claude Code session runs a thin
+**MCP proxy** that forwards tool calls to the daemon over a local control channel — so
+**multiple sessions and projects can use Pigeon at once** (scope each to its dev server
+with `get_recent_errors({ pageUrl })`).
 
 ## Layout
 
 ```
 pigeon/
   extension/   # Chrome Manifest V3 extension (TypeScript, esbuild)
-  server/      # Node bridge: WebSocket server + MCP stdio server (TypeScript)
+  server/      # Bridge daemon (WebSocket + buffer) + per-session MCP proxy (TypeScript)
   README.md
 ```
 
@@ -233,12 +239,17 @@ For runtime errors in the browser, use the `pigeon` MCP tools
 
 Leave `reload_tab`, `eval_in_page`, and `clear_errors` to prompt.
 
-### One limitation
+### Multiple sessions & projects
 
-The bridge runs **inside** the Claude Code session and binds port `8765`. With multiple Claude
-Code sessions open at once, the first owns the port; others still have the tools but get no
-browser feed. Fine for one-session-per-project work; for more, run the bridge as a standalone
-service.
+This works out of the box. A single **bridge daemon** is auto-started on first use and shared
+by every Claude Code session — open as many as you like across different projects. All
+localhost tabs feed the same buffer; scope each session to its own dev server with the
+`pageUrl` filter, e.g. *“errors from `:3000`”* → `get_recent_errors({ pageUrl: "3000" })`.
+
+The daemon keeps running in the background after sessions close (it owns the browser feed) —
+normally just leave it. To stop it: `pkill -f dist/bridge.js`. The **first** session's env
+(`PIGEON_DB`, `PIGEON_ALLOW_EVAL`) configures the daemon, so set those consistently in your
+user-scope registration; later sessions reuse the already-running daemon as-is.
 
 ## Browser control & security
 
@@ -258,8 +269,9 @@ Pigeon can also drive the browser, so Claude can *reproduce* a bug rather than o
 
 | Env var | Default | Where | Meaning |
 |---------|---------|-------|---------|
-| `PIGEON_WS_PORT` | `8765` | server | WebSocket port (must match the extension's `WS_URL`). |
-| `PIGEON_LOG_FILE` | — | server | If set, mirror stderr logs to this file. |
+| `PIGEON_WS_PORT` | `8765` | daemon | Extension WebSocket port (must match the extension's `WS_URL`). |
+| `PIGEON_CONTROL_PORT` | `8766` | both | Control-channel port between the daemon and MCP proxies. |
+| `PIGEON_LOG_FILE` | — | both | If set, mirror stderr logs to this file (handy to see daemon logs). |
 | `PIGEON_SOURCEMAPS` | `1` | server | Set to `0` to disable source-map resolution of stacks. |
 | `PIGEON_ALLOW_EVAL` | — | server | Set to `1` to expose the `eval_in_page` tool (also needs the popup toggle). |
 | `PIGEON_DB` | — | server | Path to a JSONL file; enables persistent history + the `get_error_history` tool. |
@@ -296,7 +308,8 @@ Changing the port? Update `WS_URL` in `extension/src/background.ts` and rebuild.
 ```bash
 # server
 npm --prefix server run dev             # tsc --watch
-npm --prefix server run test:e2e        # full MCP client/server smoke test
+npm --prefix server run test:e2e        # full MCP proxy/daemon smoke test
+npm --prefix server run test:multi      # two sessions sharing one daemon + pageUrl scoping
 npm --prefix server run test:sourcemap  # source-map resolution test
 
 # extension

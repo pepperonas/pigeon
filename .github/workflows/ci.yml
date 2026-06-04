@@ -48,6 +48,10 @@ jobs:
         working-directory: server
         run: npm run test:e2e
 
+      - name: Multi-session test
+        working-directory: server
+        run: npm run test:multi
+
   browser-e2e:
     runs-on: ubuntu-latest
     steps:

@@ -6,11 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Pigeon forwards browser console errors (and uncaught exceptions, unhandled rejections, failed
 network requests) to Claude Code over MCP, and can drive the browser back. A Chrome MV3
-extension captures errors and ships them over a WebSocket to a local Node bridge, which exposes
-them to Claude Code as an MCP (stdio) server.
+extension captures errors and ships them over a WebSocket to a standalone **bridge daemon**;
+each Claude Code session runs a thin **MCP proxy** that talks to the daemon over a control
+channel — so many sessions/projects share one browser feed.
 
 ```
-page → injected(MAIN) → content(ISOLATED) → service worker → WebSocket(:8765) → bridge → MCP stdio → Claude Code
+page → injected(MAIN) → content(ISOLATED) → service worker → WS(:8765) → bridge daemon
+                                                                  │ control channel (:8766)
+                                          MCP proxy (per session) ┴─ stdio ─→ Claude Code
 ```
 
 ## Commands
@@ -40,21 +43,30 @@ There is no per-test runner; each `test:*` is a standalone script. Run one direc
 
 ## Architecture
 
-**server/** — one process, two faces, wired in `index.ts`:
+**server/** — split into a **daemon** and a **proxy** so many sessions share one feed:
+
+*Daemon* (`bridge.ts`, run via `pigeon-bridge` / auto-spawned): owns all state.
 - `buffer.ts` `ErrorBuffer` — ring buffer (200) with 2 s dedup on `message`+`stack`. Large blobs
   (screenshot/DOM) are kept in a separate attachment store (cap 20) keyed by error id, never in
   the ring. Emits `add` (any add/bump → wakes `wait_for_next_error`) and `new` (brand-new only →
   persistence). `hydrate()` seeds from history without re-emitting.
-- `ws-server.ts` — `ws` server on `127.0.0.1:8765`. Validates/normalizes incoming error events,
-  routes `command-result` messages to the CommandBus, and kicks off async source-map resolution
-  that mutates the stored entry's `resolvedStack`.
-- `mcp-server.ts` — high-level `McpServer` over stdio. Tools, resources (incl. `ResourceTemplate`
-  for per-error screenshot/DOM), and prompts. Tool/resource availability is gated (see below).
-- `commandbus.ts` `CommandBus` — request/response from server → extension over the same WebSocket
+- `ws-server.ts` — `ws` server on `127.0.0.1:8765` (extension). Validates/normalizes events,
+  routes `command-result` to the CommandBus, kicks off async source-map resolution that mutates
+  the stored entry's `resolvedStack`.
+- `commandbus.ts` `CommandBus` — request/response daemon → extension over that WebSocket
   (`{kind:"command"}` out, `{kind:"command-result"}` back), correlated by id with timeouts.
 - `sourcemap.ts` — fetches the dev server's JS + maps to rewrite minified stacks (cached 5 s).
 - `store.ts` `ErrorStore` — append-only JSONL history when `PIGEON_DB` is set.
-- `log.ts` — **all logging goes to stderr** (or `PIGEON_LOG_FILE`).
+- `control.ts` `startControlServer` — control channel on `:8766`; binding it is the **singleton
+  lock** (daemon exits if already bound). Serves RPC: `getRecent/clear/stats/history/getAttachment/
+  waitForNext/sendCommand/info/shutdown`.
+
+*Proxy* (`index.ts`, the per-session MCP server Claude Code launches):
+- Connects to the daemon via `ControlClient` (`control.ts`), auto-spawning `bridge.js` **detached**
+  if the control port is refused. Queries `info` for capability gating.
+- `mcp-server.ts` — high-level `McpServer` over stdio; every tool/resource/prompt forwards to the
+  daemon through the control client. Resources use `ResourceTemplate` for per-error screenshot/DOM.
+- `log.ts` — **all logging goes to stderr** (or `PIGEON_LOG_FILE`). Shared by both.
 
 **extension/** (MV3, bundled per-entry by `build.mjs`):
 - `injected.ts` — runs in the **MAIN world as a content script at `document_start`** (declared in
@@ -69,8 +81,11 @@ There is no per-test runner; each `test:*` is a standalone script. Run one direc
 
 ## Invariants & gotchas (don't regress these)
 
-- **stdout is sacred** in the server: it's the MCP JSON-RPC channel. Never `console.log`; use
-  `log()` from `log.ts`. The E2E test passing proves the protocol stays clean.
+- **stdout is sacred** in the MCP proxy (`index.ts`): it's the JSON-RPC channel. Never
+  `console.log`; use `log()` from `log.ts`. The E2E test passing proves the protocol stays clean.
+- **Daemon is the single source of truth.** The proxy holds no state — all tool handlers RPC to
+  the daemon. The control port (`:8766`) is the singleton lock; the daemon survives session exit
+  and is shared. Test with isolated ports + `shutdownDaemon()` so runs don't touch a real daemon.
 - **injected.ts must stay a MAIN-world content script.** The old `<script src>` injection loaded
   async and missed synchronous early errors — that's a fixed bug; don't reintroduce it.
 - **content→SW delivery must retry.** Same reason — early errors race the SW cold start.
@@ -80,17 +95,20 @@ There is no per-test runner; each `test:*` is a standalone script. Run one direc
 
 ## Gating (security)
 
-`eval_in_page` runs arbitrary JS in the page — **double opt-in**: server env `PIGEON_ALLOW_EVAL=1`
-(else the tool isn't registered) **and** the extension popup's "Allow remote eval" toggle (default
-off). `reload_tab` is always available. Browser-captured strings are untrusted: the MCP prompts
-fence them as data (see `untrustedBlock` in `mcp-server.ts`) — keep that when editing prompts.
+`eval_in_page` runs arbitrary JS in the page — **double opt-in**: daemon env `PIGEON_ALLOW_EVAL=1`
+(reported via `info`, else the tool isn't registered) **and** the extension popup's "Allow remote
+eval" toggle (default off). `reload_tab` is always available. Browser-captured strings are
+untrusted: the MCP prompts fence them as data (see `untrustedBlock` in `mcp-server.ts`) — keep
+that when editing prompts.
 
 ## Env flags
 
-`PIGEON_WS_PORT` (8765) · `PIGEON_SOURCEMAPS` (1) · `PIGEON_ALLOW_EVAL` · `PIGEON_DB` (JSONL path)
-· `PIGEON_LOG_FILE`. Changing the port also requires updating `WS_URL` in `extension/src/background.ts`.
+`PIGEON_WS_PORT` (8765) · `PIGEON_CONTROL_PORT` (8766) · `PIGEON_SOURCEMAPS` (1) ·
+`PIGEON_ALLOW_EVAL` · `PIGEON_DB` (JSONL path) · `PIGEON_LOG_FILE`. These configure the **daemon**
+(the proxy forwards its env when auto-spawning it). Changing the WS port also requires updating
+`WS_URL` in `extension/src/background.ts`.
 
 ## CI
 
-`.github/workflows/ci.yml`: `build-test` (build both, typecheck, unit + sourcemap + E2E) and
+`.github/workflows/ci.yml`: `build-test` (build both, typecheck, unit + sourcemap + E2E + multi) and
 `browser-e2e` (installs Chrome for Testing, runs the real-browser smoke test).

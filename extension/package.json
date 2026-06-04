@@ -1,6 +1,6 @@
 {
   "name": "pigeon-extension",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Pigeon Chrome MV3 extension: capture browser console errors and forward to the local bridge.",
   "type": "module",

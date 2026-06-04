@@ -1,10 +1,17 @@
 {
   "manifest_version": 3,
   "name": "Pigeon — Console Error Forwarder",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Forwards browser console errors and uncaught exceptions to Claude Code via a local WebSocket bridge.",
-  "permissions": ["storage", "alarms", "scripting"],
-  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
+  "permissions": [
+    "storage",
+    "alarms",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",
@@ -24,15 +31,25 @@
   },
   "content_scripts": [
     {
-      "matches": ["http://localhost/*", "http://127.0.0.1/*"],
-      "js": ["injected.js"],
+      "matches": [
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "injected.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": false
     },
     {
-      "matches": ["http://localhost/*", "http://127.0.0.1/*"],
-      "js": ["content.js"],
+      "matches": [
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_start",
       "world": "ISOLATED",
       "all_frames": false

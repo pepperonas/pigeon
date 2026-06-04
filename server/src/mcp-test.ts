@@ -29,6 +29,28 @@ function assert(cond: unknown, msg: string): void {
   if (!cond) throw new Error("ASSERT FAILED: " + msg);
 }
 
+// Isolated ports so the test never touches a real running bridge (8765/8766).
+const WS_PORT = 8865;
+const CONTROL_PORT = 8866;
+
+/** Stop the auto-spawned daemon via its control channel so it doesn't leak. */
+async function shutdownDaemon(): Promise<void> {
+  try {
+    const cws = new WebSocket(`ws://127.0.0.1:${CONTROL_PORT}`);
+    await new Promise<void>((res, rej) => {
+      cws.on("open", () => res());
+      cws.on("error", rej);
+    });
+    cws.send(JSON.stringify({ id: "shutdown", method: "shutdown" }));
+    await sleep(200);
+    cws.close();
+  } catch {
+    /* nothing running */
+  }
+}
+
+await shutdownDaemon(); // clear any daemon left over from a prior aborted run
+
 // --- Serve a minified file with an inline source map ------------------------
 const gen = new SourceMapGenerator({ file: "app.min.js" });
 gen.addMapping({
@@ -62,7 +84,13 @@ const transport = new StdioClientTransport({
   command: "node",
   args: ["dist/index.js"],
   stderr: "inherit",
-  env: { ...process.env, PIGEON_ALLOW_EVAL: "1", PIGEON_DB: histPath } as Record<string, string>,
+  env: {
+    ...process.env,
+    PIGEON_ALLOW_EVAL: "1",
+    PIGEON_DB: histPath,
+    PIGEON_WS_PORT: String(WS_PORT),
+    PIGEON_CONTROL_PORT: String(CONTROL_PORT),
+  } as Record<string, string>,
 });
 const client = new Client({ name: "pigeon-e2e", version: "0.1.0" });
 await client.connect(transport);
@@ -82,7 +110,7 @@ assert(resources.resources.some((r) => r.uri === "pigeon://errors"), "pigeon://e
 // 3. wait_for_next_error unblocks on a pushed error whose stack references app.min.js
 const waitPromise = client.callTool({ name: "wait_for_next_error", arguments: { timeout_ms: 5000 } });
 await sleep(300);
-const ws = new WebSocket("ws://127.0.0.1:8765");
+const ws = new WebSocket(`ws://127.0.0.1:${WS_PORT}`);
 await new Promise<void>((res, rej) => {
   ws.on("open", () => res());
   ws.on("error", rej);
@@ -261,6 +289,7 @@ console.error("clear OK");
 ws.close();
 http.close();
 await client.close();
+await shutdownDaemon();
 rmSync(histPath, { force: true });
 console.error("\nALL E2E CHECKS PASSED");
 process.exit(0);
