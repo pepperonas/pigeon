@@ -62,15 +62,16 @@ There is no per-test runner; each `test:*` is a standalone script. Run one direc
 - `store.ts` `ErrorStore` — append-only JSONL history when `PIGEON_DB` is set.
 - `control.ts` `startControlServer` — control channel (RPC: `getRecent/clear/stats/history/
   getAttachment/waitForNext/sendCommand/info/shutdown`). Binds the first free port from the base.
-- `runtime.ts` — out-of-the-box port handling: `bindWss` picks the first free port from a base;
-  `acquireLock` is the **singleton lock** (atomic `wx` lock file, stale-pid reclaim); the daemon
-  writes its chosen ports to `~/.pigeon/runtime.json` (the discovery file) and removes lock +
-  file on exit. `PORT_SCAN_RANGE` must stay in sync with the extension's scan.
+- `runtime.ts` — out-of-the-box port handling: `bindWss` picks the first free port from a base
+  (closing failed binds as it scans); `acquireLock` is the **singleton lock** (atomic `wx` lock
+  file, stale-pid reclaim); the daemon writes its chosen ports to `~/.pigeon/runtime.json`
+  **atomically** (temp + rename, so proxies never read a torn file) and removes lock + file on
+  exit. `PORT_SCAN_RANGE` must stay in sync with the extension's scan.
 
 *Proxy* (`index.ts`, the per-session MCP server Claude Code launches):
-- Discovers the daemon's control port via `~/.pigeon/runtime.json` (`readRuntime`), auto-spawning
-  `bridge.js` **detached** and polling the file if no live daemon is recorded. Queries `info` for
-  capability gating.
+- Discovers the daemon's control port via `~/.pigeon/runtime.json` (`readRuntime`), retrying a
+  recorded-but-busy daemon a few times before auto-spawning `bridge.js` **detached** and polling
+  the file. Queries `info` for capability gating.
 - `mcp-server.ts` — high-level `McpServer` over stdio; every tool/resource/prompt forwards to the
   daemon through the control client. Resources use `ResourceTemplate` for per-error screenshot/DOM.
 - `log.ts` — **all logging goes to stderr** (or `PIGEON_LOG_FILE`). Shared by both.
@@ -82,8 +83,9 @@ There is no per-test runner; each `test:*` is a standalone script. Run one direc
 - `content.ts` — ISOLATED world; relays postMessage → `chrome.runtime.sendMessage` **with retry**
   (early events would otherwise be dropped before the lazy SW is listening).
 - `background.ts` — service worker. WebSocket client that **scans `WS_BASE..+WS_PORT_SCAN`** to
-  find the daemon (it can't read the runtime file), remembers the working port, fast-sweeps then
-  backs off; `alarms` heartbeat, session-persisted queue, screenshot capture, and `handleCommand`
+  find the daemon (it can't read the runtime file): remembers the working port, retries the SAME
+  port on a healthy drop and only advances on a connect failure (fast-sweep then back off).
+  `alarms` heartbeat, throttled session-persisted queue, screenshot capture, and `handleCommand`
   (reload / eval via `chrome.scripting.executeScript` in MAIN world). Keep `WS_BASE`/`WS_PORT_SCAN`
   in sync with `runtime.ts`.
 - `popup.*` / `serialize.ts` (pure, unit-tested).
