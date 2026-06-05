@@ -13,6 +13,7 @@ export function dashboardHtml(token: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
 <title>🐦 Pigeon</title>
+<script>/* tell the Pigeon extension not to capture its own dashboard (avoids a feedback loop) */ window.__PIGEON_DASHBOARD__ = true;</script>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -50,6 +51,10 @@ export function dashboardHtml(token: string): string {
     font-size: 12px; color: #c7cad1; }
   .ev img { max-width: 100%; margin-top: 8px; border-radius: 6px; border: 1px solid #24262e; }
   .count { background: #24262e; border-radius: 999px; padding: 0 7px; font-size: 11px; }
+  .tabs { float: right; font-weight: 400; display: flex; gap: 4px; }
+  .tab { padding: 3px 10px; font-size: 12px; border-radius: 7px; }
+  .tab.on { background: #2c3550; border-color: #3b4a72; color: #cdd8ff; }
+  .tab:disabled { opacity: .45; cursor: not-allowed; }
   .empty { color: #777d88; padding: 8px; }
   a { color: #93c5fd; }
 </style>
@@ -76,7 +81,12 @@ export function dashboardHtml(token: string): string {
     <div id="sessions-empty" class="empty">No Claude Code sessions connected.</div>
   </section>
   <section>
-    <h2>Errors <span id="e-count" class="count">0</span></h2>
+    <h2>Errors <span id="e-count" class="count">0</span>
+      <span class="tabs">
+        <button id="tab-live" class="tab on">Live</button>
+        <button id="tab-hist" class="tab" title="Persisted JSONL history (PIGEON_DB)">History</button>
+      </span>
+    </h2>
     <div id="feed" class="feed"></div>
     <div id="feed-empty" class="empty">Buffer is empty.</div>
   </section>
@@ -125,21 +135,52 @@ function renderFeed(errors) {
   }).join("");
 }
 
+let mode = "live";       // "live" = in-memory buffer, "hist" = persisted JSONL history
+let hasStore = false;
+function setMode(m) {
+  if (m === "hist" && !hasStore) return;
+  mode = m;
+  $("tab-live").classList.toggle("on", m === "live");
+  $("tab-hist").classList.toggle("on", m === "hist");
+  refresh();
+}
+$("tab-live").onclick = () => setMode("live");
+$("tab-hist").onclick = () => setMode("hist");
+
 async function refresh() {
+  let s;
   try {
     const r = await fetch("/api/state", { headers: H });
     if (!r.ok) throw new Error(r.status);
-    const s = await r.json();
-    setDot("d-daemon", true); $("t-daemon").textContent = "daemon pid " + s.info.pid;
-    setDot("d-ext", s.info.extensionConnections > 0);
-    $("t-ext").textContent = s.info.extensionConnections > 0 ? "extension (" + s.info.extensionConnections + ")" : "no extension";
-    $("b-eval").textContent = "eval " + (s.info.allowEval ? "ON" : "off");
-    $("b-hist").textContent = "history " + (s.info.hasStore ? "ON" : "off");
-    $("b-ports").textContent = "ws:" + s.info.wsPort + " · ctrl:" + s.info.controlPort + " · ui:" + s.info.dashboardPort;
-    renderSessions(s.sessions || []);
-    renderFeed(s.errors || []);
+    s = await r.json();
   } catch {
     setDot("d-daemon", false); $("t-daemon").textContent = "daemon unreachable";
+    return;
+  }
+  setDot("d-daemon", true); $("t-daemon").textContent = "daemon pid " + s.info.pid;
+  setDot("d-ext", s.info.extensionConnections > 0);
+  $("t-ext").textContent = s.info.extensionConnections > 0 ? "extension (" + s.info.extensionConnections + ")" : "no extension";
+  $("b-eval").textContent = "eval " + (s.info.allowEval ? "ON" : "off");
+  $("b-hist").textContent = "history " + (s.info.hasStore ? "ON" : "off");
+  $("b-ports").textContent = "ws:" + s.info.wsPort + " · ctrl:" + s.info.controlPort + " · ui:" + s.info.dashboardPort;
+  renderSessions(s.sessions || []);
+
+  hasStore = !!s.info.hasStore;
+  $("tab-hist").disabled = !hasStore;
+  if (!hasStore && mode === "hist") setMode("live"); // can't show history without a store
+
+  if (mode === "live") {
+    $("feed-empty").textContent = "Buffer is empty.";
+    renderFeed(s.errors || []);
+  } else {
+    try {
+      const h = await (await fetch("/api/history?limit=200", { headers: H })).json();
+      $("feed-empty").textContent = h.enabled ? "No persisted history yet." : "Persistence is off (set PIGEON_DB).";
+      renderFeed(h.errors || []);
+    } catch {
+      $("feed-empty").textContent = "Could not load history.";
+      renderFeed([]);
+    }
   }
 }
 refresh();

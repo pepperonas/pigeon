@@ -40,6 +40,11 @@ import { buildMessage, serializeArg } from "./serialize.js";
   }
 
   function post(payload: Payload): void {
+    // Never capture Pigeon's own dashboard: it runs on localhost too, so without
+    // this guard the extension would log the dashboard's API traffic into the
+    // very buffer/history it displays (a feedback loop — e.g. 403s after a token
+    // rotation). The page sets this flag in an early inline script.
+    if ((window as unknown as { __PIGEON_DASHBOARD__?: boolean }).__PIGEON_DASHBOARD__) return;
     try {
       window.postMessage({ [MARK]: true, payload }, window.location.origin);
     } catch {

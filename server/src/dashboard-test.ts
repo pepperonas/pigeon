@@ -25,6 +25,7 @@ const env = {
   PIGEON_WS_PORT: "8965",
   PIGEON_CONTROL_PORT: "8966",
   PIGEON_DASHBOARD_PORT: "8967",
+  PIGEON_DB: join(RUNTIME_DIR, "history.jsonl"), // exercise the History tab/endpoint
 } as Record<string, string>;
 
 const daemon = spawn("node", ["dist/bridge.js"], { env, stdio: "inherit" });
@@ -98,6 +99,15 @@ async function main(): Promise<void> {
   const after = (await (await fetch(`${base}/api/state`, { headers: { "x-pigeon-token": token } })).json()) as { errors: unknown[] };
   assert(after.errors.length === 0, "buffer is empty after clear");
   console.log("clear OK");
+
+  // History (PIGEON_DB) persists the error even after the buffer was cleared.
+  const hist = (await (await fetch(`${base}/api/history`, { headers: { "x-pigeon-token": token } })).json()) as {
+    enabled: boolean;
+    errors: { message: string }[];
+  };
+  assert(hist.enabled === true, "history endpoint reports enabled (PIGEON_DB set)");
+  assert(hist.errors.some((e) => e.message.includes("DASH_MARKER")), "history still has the error after buffer clear");
+  console.log("history persistence OK");
 
   ws.close();
   console.log("\nDASHBOARD CHECKS PASSED");

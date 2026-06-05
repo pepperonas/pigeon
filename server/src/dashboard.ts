@@ -134,6 +134,19 @@ export async function startDashboard(
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/history") {
+      if (!store) {
+        json(res, 200, { enabled: false, errors: [] });
+        return;
+      }
+      const n = Number(url.searchParams.get("limit") ?? "100");
+      store
+        .query({ limit: Number.isFinite(n) ? n : 100 })
+        .then((errors) => json(res, 200, { enabled: true, errors }))
+        .catch((e) => json(res, 500, { enabled: true, error: (e as Error).message }));
+      return;
+    }
+
     const att = /^\/api\/errors\/(\d+)\/(screenshot|dom)$/.exec(url.pathname);
     if (req.method === "GET" && att) {
       const a = buffer.getAttachment(Number(att[1]));

@@ -75,8 +75,11 @@ There is no per-test runner; each `test:*` is a standalone script. Run one direc
 - `dashboard.ts` + `dashboard-html.ts` `startDashboard` — local web dashboard (HTTP, first-free
   port from 8767). **127.0.0.1 only**, `Host`-header allowlist (anti-rebinding), every `/api/*`
   gated on a per-daemon **token** (in the 600-mode runtime file + embedded in the served HTML);
-  mutations also require same-origin. Read-mostly (`/api/state` polled 1 s, attachments, `clear`,
-  `shutdown`). Eval state is shown **read-only** — never toggled here. On by default (`PIGEON_DASHBOARD=0` off).
+  mutations also require same-origin. Read-mostly (`/api/state` polled 1 s, `/api/history` for the
+  History tab when a store exists, attachments, `clear`, `shutdown`). Eval state is shown
+  **read-only** — never toggled here. On by default (`PIGEON_DASHBOARD=0` off). The page sets
+  `window.__PIGEON_DASHBOARD__` so the extension's `injected.ts` skips capturing it — without that,
+  the dashboard (being on localhost) would log its own API traffic into the buffer it shows.
 - `runtime.ts` — out-of-the-box port handling: `bindWss` picks the first free port from a base
   (closing failed binds as it scans); `acquireLock` is the **singleton lock** (atomic `wx` lock
   file, stale-pid reclaim); the daemon writes its chosen ports + dashboard port + token to

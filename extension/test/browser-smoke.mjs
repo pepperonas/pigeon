@@ -68,9 +68,19 @@ const PAGE = `<!doctype html><html><head><title>pigeon-test</title></head><body>
   uf("/missing-unbound").catch(function(){});
 </script>
 </body></html>`;
+// A page that marks itself as the Pigeon dashboard — its errors must be ignored.
+const DASH_PAGE = `<!doctype html><html><head><title>dash-like</title>
+<script>window.__PIGEON_DASHBOARD__ = true;</script></head><body>
+<script>
+  console.error("DASH_SELF_MARKER");
+  fetch("/missing-self").catch(function(){});
+  setTimeout(function(){ throw new Error("DASH_SELF_THROW"); }, 30);
+</script></body></html>`;
 const http = createServer((req, res) => {
-  if (req.url === "/missing-404" || req.url === "/missing-unbound") {
+  if (req.url === "/missing-404" || req.url === "/missing-unbound" || req.url === "/missing-self") {
     res.writeHead(404).end("nope");
+  } else if (req.url === "/dashlike") {
+    res.writeHead(200, { "content-type": "text/html" }).end(DASH_PAGE);
   } else {
     res.writeHead(200, { "content-type": "text/html" }).end(PAGE);
   }
@@ -138,6 +148,16 @@ try {
     errors.some((e) => typeof e.tabId === "number" && typeof e.pageUrl === "string"),
     "events carry tabId + pageUrl",
   );
+
+  // A page that flags itself as the Pigeon dashboard must NOT be captured
+  // (otherwise the dashboard would log its own API traffic into its own buffer).
+  await page.goto(`${url}dashlike`, { waitUntil: "load" });
+  await sleep(800);
+  assert(
+    !errors.some((e) => /DASH_SELF_MARKER|DASH_SELF_THROW|missing-self/.test(e.message)),
+    "dashboard-flagged page is not captured (__PIGEON_DASHBOARD__ suppresses reporting)",
+  );
+  console.error("dashboard self-capture suppression OK");
 
   // reload command round-trip (no allowControl needed)
   assert(swSocket, "service worker connected to the bridge");

@@ -297,8 +297,13 @@ bin once with `npm --prefix server link` (or add `server/dist/cli.js` to your PA
 
 The daemon serves a live dashboard on `http://127.0.0.1:8767` (first free port from there; see it in
 `pigeon status` or the daemon log). It shows daemon health + ports, the **connected sessions** (which
-project, since when, which dev-server they're scoped to), and a **live error feed** (level-coloured,
-click to expand the source-mapped stack + screenshot). Buttons clear the buffer or stop the daemon.
+project, since when, which dev-server they're scoped to), and an error feed (level-coloured, click to
+expand the source-mapped stack + screenshot). The feed has two tabs: **Live** (the in-memory buffer)
+and **History** (the persisted JSONL — only when `PIGEON_DB` is set; it outlives restarts and the
+buffer). Buttons clear the buffer or stop the daemon.
+
+The dashboard never pollutes its own data: its page marks itself so the extension skips capturing it
+(otherwise, running on localhost, it would log its own API traffic into the buffer it displays).
 
 It's **on by default**; disable with `PIGEON_DASHBOARD=0`. Security: it binds `127.0.0.1` only,
 validates the `Host` header (anti-DNS-rebinding), and gates every API call on a per-daemon token kept
