@@ -189,7 +189,9 @@ claude mcp add pigeon \
 ```
 
 Then, inside Claude Code, verify with `/mcp` — you should see `pigeon` connected with its
-four tools and the `pigeon://errors` resource.
+tools and the `pigeon://errors` resource. (How many tools depends on gating: the four
+buffer tools plus `reload_tab` are always there; `get_error_history` appears with
+`PIGEON_DB` set and `eval_in_page` with `PIGEON_ALLOW_EVAL=1`.)
 
 ---
 
