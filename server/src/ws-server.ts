@@ -1,12 +1,25 @@
 import { WebSocketServer } from "ws";
 import type { ErrorBuffer } from "./buffer.js";
 import type { CommandBus } from "./commandbus.js";
+import type { DaemonMeta } from "./control.js";
 import type { ErrorEvent } from "./types.js";
 import { bindWss } from "./runtime.js";
 import { resolveStack } from "./sourcemap.js";
 import { log } from "./log.js";
 
 const HOST = "127.0.0.1";
+
+/**
+ * Drop events the Pigeon dashboard captured about itself. The extension's
+ * `__PIGEON_DASHBOARD__` flag already suppresses this at the source, but an
+ * un-reloaded/older extension wouldn't — and the daemon knows its own dashboard
+ * port, so it can refuse its own traffic unconditionally (defense in depth).
+ */
+function isFromOwnDashboard(ev: ErrorEvent, dashboardPort?: number): boolean {
+  if (!dashboardPort) return false;
+  const u = ev.pageUrl ?? "";
+  return u.includes(`127.0.0.1:${dashboardPort}`) || u.includes(`localhost:${dashboardPort}`);
+}
 
 const MAX_MESSAGE_LEN = 8000;
 const MAX_STACK_LEN = 16000;
@@ -17,6 +30,7 @@ export async function startWebSocketServer(
   buffer: ErrorBuffer,
   commandBus: CommandBus,
   startPort: number,
+  meta?: DaemonMeta,
 ): Promise<{ wss: WebSocketServer; port: number }> {
   const { wss, port } = await bindWss(HOST, startPort);
   log(`WebSocket listening on ws://${HOST}:${port}`);
@@ -41,6 +55,7 @@ export async function startWebSocketServer(
       for (const raw of batch) {
         const ev = normalize(raw);
         if (!ev) continue;
+        if (isFromOwnDashboard(ev, meta?.dashboardPort)) continue; // never capture our own dashboard
         const entry = buffer.add(ev);
         // Resolve the minified stack in the background; mutate the stored entry.
         if (entry.stack && !entry.resolvedStack) {

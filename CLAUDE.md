@@ -59,7 +59,9 @@ There is no per-test runner; each `test:*` is a standalone script. Run one direc
   persistence). `hydrate()` seeds from history without re-emitting.
 - `ws-server.ts` — `ws` server on `127.0.0.1:8765` (extension). Validates/normalizes events,
   routes `command-result` to the CommandBus, kicks off async source-map resolution that mutates
-  the stored entry's `resolvedStack`.
+  the stored entry's `resolvedStack`. **Drops events whose `pageUrl` is the daemon's own dashboard
+  port** (`isFromOwnDashboard`, via `meta.dashboardPort`) — server-side defense-in-depth so the
+  dashboard can't pollute the buffer it shows even with an old/un-reloaded extension.
 - `commandbus.ts` `CommandBus` — request/response daemon → extension over that WebSocket
   (`{kind:"command"}` out, `{kind:"command-result"}` back), correlated by id with timeouts.
 - `sourcemap.ts` — fetches the dev server's JS + maps to rewrite minified stacks (cached 5 s).
@@ -133,6 +135,11 @@ There is no per-test runner; each `test:*` is a standalone script. Run one direc
 - **Dashboard token lives in `runtime.json` (mode 600).** All `/api/*` require it; the served HTML
   embeds it so the page authenticates but a remote page can't read it. Keep the `Host` allowlist and
   127.0.0.1 bind — the buffer holds page data, so the HTTP listener is real attack surface.
+- **`buffer.getRecent` sorts by `lastSeen` (then id), not insertion order** — a deduped entry that
+  just recurred bubbles up so its position matches the timestamp shown. The dashboard feed re-renders
+  only when the data (or a 10 s bucket) changes and re-applies remembered open `<details>` ids, so an
+  entry you've expanded doesn't collapse on the 1 s poll. Each entry shows its source (pageUrl host
+  chip + page/tab/origin/status in the body).
 
 ## Gating (security)
 

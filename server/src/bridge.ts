@@ -69,7 +69,7 @@ async function main(): Promise<void> {
   const token = randomBytes(16).toString("hex");
 
   const control = await startControlServer(HOST, CONTROL_BASE, { buffer, commandBus, store, allowEval, meta });
-  const ws = await startWebSocketServer(buffer, commandBus, WS_BASE);
+  const ws = await startWebSocketServer(buffer, commandBus, WS_BASE, meta);
   meta.wsPort = ws.port;
   meta.controlPort = control.port;
 

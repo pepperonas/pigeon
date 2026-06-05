@@ -51,6 +51,10 @@ export function dashboardHtml(token: string): string {
     font-size: 12px; color: #c7cad1; }
   .ev img { max-width: 100%; margin-top: 8px; border-radius: 6px; border: 1px solid #24262e; }
   .count { background: #24262e; border-radius: 999px; padding: 0 7px; font-size: 11px; }
+  .src { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+    background: #1b2733; color: #9fc6e8; padding: 1px 7px; border-radius: 6px; white-space: nowrap; }
+  .ev .meta { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: #9aa0ab; }
+  .ev .meta b { color: #c7cad1; font-weight: 600; }
   .tabs { float: right; font-weight: 400; display: flex; gap: 4px; }
   .tab { padding: 3px 10px; font-size: 12px; border-radius: 7px; }
   .tab.on { background: #2c3550; border-color: #3b4a72; color: #cdd8ff; }
@@ -118,19 +122,48 @@ function renderSessions(sessions) {
   ).join("");
 }
 
+// Remember which entries are expanded so a refresh doesn't collapse them.
+const openIds = new Set();
+let lastSig = "";
+$("feed").addEventListener("toggle", (ev) => {
+  const d = ev.target;
+  if (!d || d.tagName !== "DETAILS") return;
+  const id = d.getAttribute("data-id");
+  if (id == null) return;
+  if (d.open) openIds.add(id); else openIds.delete(id);
+}, true);
+
+function srcHost(url) { if (!url) return ""; try { return new URL(url).host; } catch { return url; } }
+
 function renderFeed(errors) {
   $("e-count").textContent = errors.length;
   $("feed-empty").style.display = errors.length ? "none" : "";
+  // Re-render only when the data (or a coarse 10 s time bucket, to refresh the
+  // "ago" labels) changes — otherwise an entry you've opened collapses every second.
+  const sig = mode + "|" + Math.floor(Date.now() / 10000) + "|" +
+    errors.map((e) => e.id + ":" + e.count + ":" + e.lastSeen).join(",");
+  if (sig === lastSig) return;
+  lastSig = sig;
   $("feed").innerHTML = errors.map((e) => {
     const stack = e.resolvedStack || e.stack || "";
     const shot = e.hasScreenshot ? "<img loading=lazy src='/api/errors/" + e.id + "/screenshot?token=" + encodeURIComponent(TOKEN) + "'>" : "";
-    const meta = [e.origin, e.pageUrl, e.status != null ? "status " + e.status : ""].filter(Boolean).map(esc).join(" · ");
-    return "<details class=ev><summary>" +
+    const host = srcHost(e.pageUrl);
+    const where = e.source ? e.source + (e.line != null ? ":" + e.line : "") : "";
+    const meta = [
+      e.pageUrl ? "<b>page</b> " + esc(e.pageUrl) : "",
+      e.tabTitle ? "<b>tab</b> " + esc(e.tabTitle) : "",
+      e.origin ? "<b>via</b> " + esc(e.origin) : "",
+      e.status != null ? "<b>status</b> " + esc(e.status) : "",
+      where ? "<b>at</b> " + esc(where) : "",
+    ].filter(Boolean).map((x) => "<span>" + x + "</span>").join("");
+    const openAttr = openIds.has(String(e.id)) ? " open" : "";
+    return "<details class=ev data-id='" + e.id + "'" + openAttr + "><summary>" +
       "<span class='pill lvl-" + esc(e.level) + "'>" + esc(e.level) + "</span>" +
+      (host ? "<span class=src>" + esc(host) + "</span>" : "") +
       "<span class=msg>" + esc(e.message) + "</span>" +
       (e.count > 1 ? "<span class=count>x" + e.count + "</span>" : "") +
       "<span class=muted>" + ago(e.lastSeen) + "</span></summary>" +
-      "<div class=muted style='margin-top:6px'>" + meta + "</div>" +
+      "<div class=meta>" + meta + "</div>" +
       (stack ? "<pre>" + esc(stack) + "</pre>" : "") + shot + "</details>";
   }).join("");
 }
@@ -140,6 +173,7 @@ let hasStore = false;
 function setMode(m) {
   if (m === "hist" && !hasStore) return;
   mode = m;
+  openIds.clear(); lastSig = ""; // fresh view per tab
   $("tab-live").classList.toggle("on", m === "live");
   $("tab-hist").classList.toggle("on", m === "hist");
   refresh();

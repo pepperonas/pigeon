@@ -73,6 +73,8 @@ async function main(): Promise<void> {
     ws.on("error", rej);
   });
   ws.send(JSON.stringify({ level: "error", origin: "onerror", message: "DASH_MARKER", pageUrl: "http://localhost:3000/", timestamp: Date.now() }));
+  // An event whose pageUrl is the dashboard itself must be dropped by the daemon.
+  ws.send(JSON.stringify({ level: "network", origin: "fetch", message: "SELF_DASH_DROP", status: 403, pageUrl: `http://127.0.0.1:${rt!.dashboardPort}/`, timestamp: Date.now() }));
   await sleep(250);
 
   // /api/state requires the token.
@@ -83,8 +85,9 @@ async function main(): Promise<void> {
   assert(ok.status === 200, "/api/state with token is accepted");
   const state = (await ok.json()) as { errors: { message: string }[]; info: { version: string; dashboardPort: number } };
   assert(state.errors.some((e) => e.message.includes("DASH_MARKER")), "state includes the pushed error");
+  assert(!state.errors.some((e) => e.message.includes("SELF_DASH_DROP")), "daemon drops events captured from its own dashboard");
   assert(state.info.dashboardPort === rt!.dashboardPort, "state reports the dashboard port");
-  console.log("token gating + state OK");
+  console.log("token gating + state + self-capture drop OK");
 
   // The served page embeds the token so its own fetches authenticate.
   const page = await (await fetch(`${base}/`)).text();
