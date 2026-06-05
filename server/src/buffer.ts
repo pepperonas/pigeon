@@ -118,7 +118,11 @@ export class ErrorBuffer extends EventEmitter {
     }
   }
 
-  /** Newest first, optionally filtered. */
+  /**
+   * Most recently active first, optionally filtered. Sorted by `lastSeen` (not
+   * insertion order) so a deduplicated entry that just recurred bubbles up —
+   * otherwise its bumped timestamp would disagree with its position in the list.
+   */
   getRecent(opts: GetRecentOptions = {}): BufferedError[] {
     let out = this.items.slice();
     if (opts.level) out = out.filter((e) => e.level === opts.level);
@@ -127,7 +131,7 @@ export class ErrorBuffer extends EventEmitter {
       const needle = opts.pageUrl.toLowerCase();
       out = out.filter((e) => (e.pageUrl ?? "").toLowerCase().includes(needle));
     }
-    out.reverse();
+    out.sort((a, b) => b.lastSeen - a.lastSeen || b.id - a.id);
     if (typeof opts.limit === "number" && opts.limit >= 0) out = out.slice(0, opts.limit);
     return out;
   }
