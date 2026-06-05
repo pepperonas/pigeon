@@ -34,6 +34,11 @@ export class CommandBus {
     return this.sockets.some((s) => s.readyState === OPEN);
   }
 
+  /** Number of currently-connected extension sockets. */
+  count(): number {
+    return this.sockets.filter((s) => s.readyState === OPEN).length;
+  }
+
   /** Resolve/reject the pending command a `command-result` message refers to. */
   handleResult(msg: { id?: unknown; ok?: unknown; result?: unknown; error?: unknown }): void {
     if (typeof msg.id !== "string") return;

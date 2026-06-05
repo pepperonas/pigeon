@@ -18,6 +18,10 @@ export interface RuntimeInfo {
   wsPort: number;
   controlPort: number;
   startedAt: number;
+  /** Local dashboard HTTP port (omitted if the dashboard is disabled). */
+  dashboardPort?: number;
+  /** Secret gating the dashboard API; only locally-readable (file is mode 600). */
+  token?: string;
 }
 
 export function runtimeDir(): string {
@@ -58,8 +62,9 @@ export function readRuntime(): RuntimeInfo | null {
 export function writeRuntime(info: RuntimeInfo): void {
   ensureDir();
   // Atomic: write to a temp file then rename, so a proxy never reads a torn file.
+  // Mode 600 — the file carries the dashboard token, so keep it owner-only.
   const tmp = `${runtimeFile()}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(info));
+  writeFileSync(tmp, JSON.stringify(info), { mode: 0o600 });
   renameSync(tmp, runtimeFile());
 }
 

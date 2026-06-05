@@ -5,6 +5,7 @@
   "description": "Pigeon bridge: WebSocket receiver for browser errors + MCP stdio server for Claude Code.",
   "type": "module",
   "bin": {
+    "pigeon": "dist/cli.js",
     "pigeon-server": "dist/index.js",
     "pigeon-bridge": "dist/bridge.js"
   },
@@ -13,9 +14,11 @@
     "dev": "tsc -w -p tsconfig.json",
     "start": "node dist/index.js",
     "bridge": "node dist/bridge.js",
+    "cli": "node dist/cli.js",
     "test:e2e": "node dist/mcp-test.js",
     "test:multi": "node dist/multi-test.js",
     "test:ports": "node dist/port-test.js",
+    "test:dashboard": "node dist/dashboard-test.js",
     "test:sourcemap": "node dist/sourcemap-test.js",
     "test:client": "node dist/test-client.js"
   },

@@ -90,6 +90,29 @@ const bScoped = textOf(await b.client.callTool({ name: "get_recent_errors", argu
 assert(bScoped.includes("errB-5173") && !bScoped.includes("errA-3000"), "session B pageUrl=5173 sees only its project");
 console.error("cross-project pageUrl scoping OK");
 
+// The daemon tracks both proxies as registered sessions (with the project name
+// they registered), and remembers the pageUrl each last scoped with.
+const rt = readRuntime();
+const ctl = new WebSocket(`ws://127.0.0.1:${rt!.controlPort}`);
+await new Promise<void>((res, rej) => {
+  ctl.on("open", () => res());
+  ctl.on("error", rej);
+});
+const sessions: any[] = await new Promise((res, rej) => {
+  ctl.on("message", (d) => {
+    const m = JSON.parse(d.toString());
+    if (m.id === "ls") res(m.result);
+  });
+  ctl.on("error", rej);
+  ctl.send(JSON.stringify({ id: "ls", method: "listSessions" }));
+});
+ctl.close();
+assert(sessions.length === 2, `daemon lists both registered sessions (got ${sessions.length})`);
+assert(sessions.every((s) => typeof s.pid === "number" && s.projectName), "sessions carry pid + projectName");
+const scopes = sessions.map((s) => s.pageUrlHint).sort();
+assert(scopes.includes("3000") && scopes.includes("5173"), "daemon remembers each session's pageUrl scope");
+console.error("session identity + scope tracking OK");
+
 // Shared state: clearing from A empties B's view too (same daemon).
 await a.client.callTool({ name: "clear_errors", arguments: {} });
 await sleep(100);

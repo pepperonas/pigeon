@@ -270,6 +270,42 @@ normally just leave it. To stop it: `pkill -f dist/bridge.js`. The **first** ses
 (`PIGEON_DB`, `PIGEON_ALLOW_EVAL`) configures the daemon, so set those consistently in your
 user-scope registration; later sessions reuse the already-running daemon as-is.
 
+## Dashboard & CLI
+
+The daemon comes with two ways to see and manage what's going on across all your sessions.
+
+### `pigeon` CLI
+
+A small terminal tool for the shared daemon (no browser needed):
+
+```bash
+node server/dist/cli.js status      # or: npm --prefix server run cli -- status
+```
+
+| Command | Shows / does |
+|---------|--------------|
+| `pigeon status` | Daemon health (pid, version, uptime), ports, whether the extension is connected, eval/history flags, buffer counts, and the **connected Claude Code sessions** — each with its project name and the dev-server it's scoped to. |
+| `pigeon doctor` | PASS/WARN/FAIL checks with actionable hints (Node version, build present, daemon up, extension connected, ports reachable, eval gating). The first thing to run when something feels off. |
+| `pigeon stop` | Shut the daemon down gracefully (sessions just respawn it on next use). |
+| `pigeon dashboard` | Open the web dashboard in your browser. |
+
+`pigeon status` when nothing is running tells you so (it never spawns a daemon). Tip: register the
+bin once with `npm --prefix server link` (or add `server/dist/cli.js` to your PATH) to type
+`pigeon` directly.
+
+### Web dashboard
+
+The daemon serves a live dashboard on `http://127.0.0.1:8767` (first free port from there; see it in
+`pigeon status` or the daemon log). It shows daemon health + ports, the **connected sessions** (which
+project, since when, which dev-server they're scoped to), and a **live error feed** (level-coloured,
+click to expand the source-mapped stack + screenshot). Buttons clear the buffer or stop the daemon.
+
+It's **on by default**; disable with `PIGEON_DASHBOARD=0`. Security: it binds `127.0.0.1` only,
+validates the `Host` header (anti-DNS-rebinding), and gates every API call on a per-daemon token kept
+in the mode-600 `~/.pigeon/runtime.json` — a random web page can't read the token, so it can't drive
+the dashboard. It **shows** the eval-gating state but never toggles it (that stays the explicit
+double opt-in below).
+
 ## Browser control & security
 
 Pigeon can also drive the browser, so Claude can *reproduce* a bug rather than only read it:
@@ -290,6 +326,8 @@ Pigeon can also drive the browser, so Claude can *reproduce* a bug rather than o
 |---------|---------|-------|---------|
 | `PIGEON_WS_PORT` | `8765` | daemon | **Base** extension WebSocket port. The daemon binds the first free port from here; the extension scans the next 16. |
 | `PIGEON_CONTROL_PORT` | `8766` | daemon | **Base** control-channel port (first free from here). Proxies discover the actual port via the runtime file. |
+| `PIGEON_DASHBOARD_PORT` | `8767` | daemon | **Base** web-dashboard HTTP port (first free from here). |
+| `PIGEON_DASHBOARD` | `1` (on) | daemon | Set to `0` to disable the local web dashboard entirely. |
 | `PIGEON_LOG_FILE` | — | both | If set, mirror stderr logs to this file (handy to see daemon logs). |
 | `PIGEON_RUNTIME_DIR` | `~/.pigeon` | both | Where the daemon writes its discovery file (`runtime.json`) + lock. |
 | `PIGEON_SOURCEMAPS` | `1` | server | Set to `0` to disable source-map resolution of stacks. |
@@ -333,7 +371,9 @@ range — so Pigeon runs out of the box even if `8765`/`8766` are already taken.
 # server
 npm --prefix server run dev             # tsc --watch
 npm --prefix server run test:e2e        # full MCP proxy/daemon smoke test
-npm --prefix server run test:multi      # two sessions sharing one daemon + pageUrl scoping
+npm --prefix server run test:multi      # two sessions sharing one daemon + pageUrl scoping + session identity
+npm --prefix server run test:ports      # daemon shifts ports when 8765/8766 are taken
+npm --prefix server run test:dashboard  # dashboard HTTP API: token gating, /api/state, clear
 npm --prefix server run test:sourcemap  # source-map resolution test
 
 # extension
@@ -351,5 +391,6 @@ cd extension && node node_modules/playwright-core/cli.js install chromium
 ```
 
 CI (`.github/workflows/ci.yml`) runs everything on each push: a `build-test` job (build,
-typecheck, unit + source-map + MCP E2E) and a `browser-e2e` job (real-browser smoke test).
+typecheck, unit + source-map + MCP E2E + multi-session + port-fallback + dashboard) and a
+`browser-e2e` job (real-browser smoke test).
 See [`CLAUDE.md`](CLAUDE.md) for the architecture and the invariants worth not regressing.
